@@ -150,34 +150,40 @@ class LarkBot:
             chat_type = msg.chat_type  # "group" | "p2p"
             mentions = msg.mentions or []
 
+            raw = self._extract_text(msg.content) if msg.message_type == "text" else ""
+            # Log every received message so we can confirm events are arriving.
+            log.info(
+                "recv message: chat_type=%s type=%s mentions=%d text=%r",
+                chat_type, msg.message_type, len(mentions), raw[:80],
+            )
+
             if msg.message_type != "text":
                 return
 
-            raw = self._extract_text(msg.content)
             # Strip @mention placeholders (@_user_1 / @_bot_1 ...) to isolate the command.
             text = _MENTION_PLACEHOLDER.sub(" ", raw).strip()
 
-            # In a group we require the bot to have been @-mentioned; in a 1:1
-            # chat any command is accepted.
-            if chat_type == "group":
-                if not mentions:
-                    return
-                bot_id = self.cfg.lark_bot_open_id
-                if bot_id:
-                    tagged = any(
-                        m.id is not None and getattr(m.id, "open_id", None) == bot_id
-                        for m in mentions
-                    )
-                    if not tagged:
-                        return
+            # In a group, only act when the bot was @-mentioned. Lark only delivers
+            # group messages that mention the bot, so the presence of a mention is
+            # enough -- we do NOT hard-require an open_id match (the id form varies
+            # and an exact check silently drops legitimate commands).
+            if chat_type == "group" and not mentions:
+                return
 
             match = _COMMAND_RE.search(text)
-            if not match:
+            if match:
+                command = match.group(1).lower()
+                args = (match.group(2) or "").strip()
+            elif chat_type != "group" and text:
+                # In a 1:1 chat, accept a bare command with no leading slash and no
+                # @-tag ("mo", "testalert", "status").
+                parts = text.split(maxsplit=1)
+                command = parts[0].lower()
+                args = parts[1] if len(parts) > 1 else ""
+            else:
                 return
-            command = match.group(1).lower()
-            args = (match.group(2) or "").strip()
 
-            log.info("command '/%s' from chat=%s msg=%s", command, chat_id, message_id)
+            log.info("dispatch command '/%s' from chat=%s (%s)", command, chat_id, chat_type)
             if self.command_handler:
                 self.command_handler(command, args, chat_id, message_id)
         except Exception:
