@@ -14,8 +14,7 @@ import io
 import json
 import logging
 import re
-import threading
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
@@ -35,7 +34,10 @@ log = logging.getLogger("lark")
 # command handler signature: (command: str, args: str, chat_id: str, message_id: str)
 CommandHandler = Callable[[str, str, str, str], None]
 
-_MENTION_PLACEHOLDER = re.compile(r"@_user_\d+")
+# Mention placeholders inside message text look like "@_user_1" / "@_bot_1" etc.
+_MENTION_PLACEHOLDER = re.compile(r"@_\w+")
+# A command is a "/word" token appearing at the start or after whitespace.
+_COMMAND_RE = re.compile(r"(?:^|\s)/([A-Za-z]\w*)\b\s*(.*)$")
 
 
 class LarkBot:
@@ -152,8 +154,8 @@ class LarkBot:
                 return
 
             raw = self._extract_text(msg.content)
-            # Strip @mention placeholders (@_user_1 ...) to isolate the command.
-            text = _MENTION_PLACEHOLDER.sub("", raw).strip()
+            # Strip @mention placeholders (@_user_1 / @_bot_1 ...) to isolate the command.
+            text = _MENTION_PLACEHOLDER.sub(" ", raw).strip()
 
             # In a group we require the bot to have been @-mentioned; in a 1:1
             # chat any command is accepted.
@@ -169,12 +171,11 @@ class LarkBot:
                     if not tagged:
                         return
 
-            if not text.startswith("/"):
+            match = _COMMAND_RE.search(text)
+            if not match:
                 return
-
-            parts = text[1:].split(maxsplit=1)
-            command = parts[0].lower() if parts else ""
-            args = parts[1] if len(parts) > 1 else ""
+            command = match.group(1).lower()
+            args = (match.group(2) or "").strip()
 
             log.info("command '/%s' from chat=%s msg=%s", command, chat_id, message_id)
             if self.command_handler:
