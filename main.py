@@ -22,7 +22,6 @@ import threading
 import time
 
 from config import config
-from cloudflare_monitor import CloudflareMonitor
 from lark_bot import LarkBot
 from qwen_client import review_spike
 from spike_detector import Spike
@@ -95,7 +94,14 @@ def main() -> int:
 
         threading.Thread(target=work, name="spike-alert", daemon=True).start()
 
-    monitor = CloudflareMonitor(on_spike=on_spike, lark_bot=lark_bot)
+    if config.cf_mode == "browser":
+        from cloudflare_monitor import CloudflareMonitor
+        monitor = CloudflareMonitor(on_spike=on_spike, lark_bot=lark_bot)
+        log.info("data source: browser (dashboard scraping)")
+    else:
+        from api_monitor import ApiMonitor
+        monitor = ApiMonitor(on_spike=on_spike, lark_bot=lark_bot)
+        log.info("data source: Cloudflare GraphQL Analytics API")
 
     def run_test_alert(chat_id: str, message_id: str) -> None:
         """/testalert — post a sample spike alert through the real format + Qwen path.

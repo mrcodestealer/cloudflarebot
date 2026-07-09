@@ -39,6 +39,13 @@ class Config:
     cf_zone: str = field(default_factory=lambda: os.getenv("CF_ZONE", ""))
     cf_analytics_url: str = field(default_factory=lambda: os.getenv("CF_ANALYTICS_URL", ""))
     cf_headless: bool = field(default_factory=lambda: _bool("CF_HEADLESS", True))
+    # Data source: "api" (Cloudflare GraphQL Analytics API, recommended) or
+    # "browser" (scrape the dashboard — only viable from a residential IP).
+    cf_mode: str = field(default_factory=lambda: os.getenv("CF_MODE", "api").strip().lower())
+    # API mode:
+    cf_api_token: str = field(default_factory=lambda: os.getenv("CF_API_TOKEN", ""))
+    cf_api_base: str = field(default_factory=lambda: os.getenv("CF_API_BASE", "https://api.cloudflare.com/client/v4").rstrip("/"))
+    cf_zone_tag: str = field(default_factory=lambda: os.getenv("CF_ZONE_TAG", ""))
     # Optional: path to a system Chromium, used if the bundled build won't run
     # (e.g. glibc too old on RHEL8/al8). Empty = use Playwright's bundled browser.
     cf_chromium_path: str = field(default_factory=lambda: os.getenv("CF_CHROMIUM_PATH", ""))
@@ -75,13 +82,18 @@ class Config:
         """Return a list of human-readable problems with the configuration."""
         problems = []
         required = {
-            "CF_EMAIL": self.cf_email,
-            "CF_PASSWORD": self.cf_password,
-            "CF_ANALYTICS_URL": self.cf_analytics_url,
             "LARK_APP_ID": self.lark_app_id,
             "LARK_APP_SECRET": self.lark_app_secret,
             "LARK_CHAT_ID": self.lark_chat_id,
         }
+        if self.cf_mode == "browser":
+            required["CF_EMAIL"] = self.cf_email
+            required["CF_PASSWORD"] = self.cf_password
+            required["CF_ANALYTICS_URL"] = self.cf_analytics_url
+        else:  # api mode
+            required["CF_API_TOKEN"] = self.cf_api_token
+            if not (self.cf_zone_tag or self.cf_zone):
+                problems.append("CF_MODE=api needs CF_ZONE_TAG (or CF_ZONE to look it up)")
         for key, val in required.items():
             if not val:
                 problems.append(f"Missing required setting: {key}")

@@ -5,8 +5,11 @@ A monitoring bot for the **Cloudflare Security Analytics** L7 DDoS chart of
 
 It:
 
-1. Logs into the Cloudflare dashboard, opens **Security Analytics → L7 DDoS,
-   last 6 hours**, and turns on **Live data**.
+1. Pulls the **L7 DDoS request timeseries** (last 6 hours, 5-minute buckets) from
+   Cloudflare's official **GraphQL Analytics API** with a read-only token
+   (`CF_MODE=api`, the default). No browser, no login, no bot challenge — works
+   from any server. (A legacy `CF_MODE=browser` scraper still exists but only
+   works from a residential IP; Cloudflare's bot challenge blocks datacenter IPs.)
 2. Continuously watches the live request-count timeseries and detects **traffic
    spikes** with an adaptive threshold (rolling mean + N×std, robust to prior
    spikes). It never misses a new spike and never re-alerts an old one.
@@ -72,6 +75,17 @@ cp .env.example .env        # then fill in the values (see below)
 > **`.env` is git-ignored** (it holds secrets). Create it on each machine (PC and
 > server). If you accept the risk of storing secrets in your **private** repo,
 > you may commit it instead — but that is not recommended.
+
+### Create the Cloudflare API token (API mode — recommended)
+
+1. Go to <https://dash.cloudflare.com/profile/api-tokens> → **Create Token** →
+   **Create Custom Token**.
+2. **Permissions:** `Zone` → `Analytics` → `Read`, and (to auto-resolve the zone
+   id) `Zone` → `Zone` → `Read`.
+3. **Zone Resources:** Include → Specific zone → `platform10.me`.
+4. Create, copy the token, and put it in `.env` as `CF_API_TOKEN=…`. Optionally
+   set `CF_ZONE_TAG=` to the zone id (from the zone's Overview page) to skip the
+   lookup. This token is read-only analytics — it cannot change anything.
 
 ### ⚠️ Two required manual steps (bot can't do these itself)
 
