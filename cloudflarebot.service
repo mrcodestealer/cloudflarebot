@@ -1,0 +1,44 @@
+# systemd unit for cloudflarebot.
+#
+# EASIEST install (generates a unit with the correct paths automatically) —
+# run these from inside the cloned repo directory:
+#
+#   DIR=$(pwd); PY=$(which python)
+#   sudo tee /etc/systemd/system/cloudflarebot.service >/dev/null <<EOF
+#   [Unit]
+#   Description=Cloudflare L7 DDoS spike monitor (Lark bot)
+#   After=network-online.target
+#   Wants=network-online.target
+#   [Service]
+#   Type=simple
+#   WorkingDirectory=$DIR
+#   ExecStart=$PY $DIR/main.py
+#   Environment=HOME=$HOME
+#   Environment=PYTHONUNBUFFERED=1
+#   Restart=always
+#   RestartSec=5
+#   [Install]
+#   WantedBy=multi-user.target
+#   EOF
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cloudflarebot.service
+#
+# OR edit the paths below and: cp cloudflarebot.service /etc/systemd/system/
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Cloudflare L7 DDoS spike monitor (Lark bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust these to your install (see the auto-generate snippet above):
+WorkingDirectory=/root/cloudflarebot
+ExecStart=/root/miniconda3/bin/python /root/cloudflarebot/main.py
+Environment=HOME=/root
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

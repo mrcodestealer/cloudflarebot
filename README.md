@@ -126,27 +126,54 @@ python main.py
   headlessly afterwards.
 - Logs stream to stdout. State (already-alerted spikes) is in `state/spikes.json`.
 
-### Run as a background service (Linux server)
-
-```ini
-# /etc/systemd/system/cloudflarebot.service
-[Unit]
-Description=Cloudflare spike monitor (Lark bot)
-After=network-online.target
-
-[Service]
-WorkingDirectory=/opt/cloudflarebot
-ExecStart=/opt/cloudflarebot/.venv/bin/python main.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+### Installing the Chromium browser
 
 ```bash
-sudo systemctl enable --now cloudflarebot
-journalctl -u cloudflarebot -f
+python -m playwright install chromium          # downloads the browser binary
+```
+
+`--with-deps` only works on Debian/Ubuntu. On **RHEL / Rocky / Alma / Fedora**
+install the OS libraries with dnf:
+
+```bash
+sudo dnf install -y nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm \
+  libxkbcommon libXcomposite libXdamage libXext libXfixes libXrandr \
+  mesa-libgbm libxcb pango cairo alsa-lib
+```
+
+### Run as a background service (systemd)
+
+A ready template is in [`cloudflarebot.service`](cloudflarebot.service). The
+easiest install auto-fills the correct paths — run from the repo directory:
+
+```bash
+DIR=$(pwd); PY=$(which python)
+sudo tee /etc/systemd/system/cloudflarebot.service >/dev/null <<EOF
+[Unit]
+Description=Cloudflare L7 DDoS spike monitor (Lark bot)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=$DIR
+ExecStart=$PY $DIR/main.py
+Environment=HOME=$HOME
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflarebot.service
+```
+
+Manage it:
+
+```bash
+systemctl restart cloudflarebot.service
+systemctl status  cloudflarebot.service
+journalctl -u cloudflarebot.service -f      # live logs
 ```
 
 ---
