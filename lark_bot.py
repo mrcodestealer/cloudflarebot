@@ -216,12 +216,19 @@ class LarkBot:
 
         Auto-reconnect is enabled by the SDK, so this survives network drops.
         """
+        # Reaction events (if the app subscribes to them) would otherwise log
+        # "processor not found"; register no-ops to keep the log clean.
+        def _ignore(_data) -> None:
+            return None
+
         handler = (
             EventDispatcherHandler.builder(
                 self.cfg.lark_encrypt_key or "",
                 self.cfg.lark_verification_token or "",
             )
             .register_p2_im_message_receive_v1(self._on_message)
+            .register_p2_im_message_reaction_created_v1(_ignore)
+            .register_p2_im_message_reaction_deleted_v1(_ignore)
             .build()
         )
         self._ws = lark.ws.Client(
