@@ -88,7 +88,7 @@ def main() -> int:
         """Review a new spike with Qwen and alert the group (off the monitor thread)."""
         def work() -> None:
             try:
-                review = review_spike(spike.as_dict())
+                review = review_spike(spike.as_dict(), kind=getattr(monitor, "_kind", "l7ddos"))
                 # Render the full 6h chart with the spike bucket marked.
                 series = monitor.snapshot_series() or spike.recent
                 png = render_series_png(

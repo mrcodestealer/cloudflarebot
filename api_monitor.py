@@ -86,7 +86,7 @@ class ApiMonitor(threading.Thread):
         title = f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)"
         png = render_series_png(series, title, highlight_ts=peak_ts)
         image_key = self.lark.upload_image(png) if png else None
-        explanation = explain_current(summary, series[-12:])
+        explanation = explain_current(summary, series[-12:], kind=self._kind)
 
         card = info_card(f"📊 {title}", summary, explanation, image_key=image_key, template="blue")
         if not self.lark.send_card(chat_id, card):

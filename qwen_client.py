@@ -27,14 +27,22 @@ class Review:
 
 
 _ANALYST_SYSTEM = (
-    "You are a senior Cloudflare Layer-7 DDoS security analyst. You are given "
-    "request-rate telemetry from Cloudflare Security Analytics for a single "
-    "zone. Decide whether a detected traffic spike looks like a genuine "
-    "anomaly / likely attack, or normal traffic variation (e.g. a marketing "
-    "burst, cron job, or benign crawl). Be concise and concrete. Always finish "
-    "your reply with a final line in exactly this form: 'VERDICT: ABNORMAL' or "
-    "'VERDICT: NORMAL'."
+    "You are a senior Cloudflare Layer-7 DDoS security analyst. You are given a "
+    "per-5-minute timeseries of the number of requests that Cloudflare's L7 DDoS "
+    "protection MITIGATED (blocked/challenged) for one zone -- i.e. attack "
+    "traffic Cloudflare already absorbed. Near-zero is normal (no attack). A "
+    "spike means an L7 DDoS attack occurred and was mitigated; judge its scale "
+    "and pattern: a large mitigation spike is a significant attack (ABNORMAL), a "
+    "small or brief one is a minor/benign mitigation (NORMAL). Do NOT say there "
+    "were 'no mitigations' -- the numbers ARE the mitigations. Be concise and "
+    "concrete. Finish with exactly 'VERDICT: ABNORMAL' or 'VERDICT: NORMAL'."
 )
+
+
+def _metric_label(kind: str) -> str:
+    if kind == "l7ddos":
+        return "requests Cloudflare's L7 DDoS engine mitigated (blocked/challenged)"
+    return "total HTTP requests"
 
 
 def _chat(system: str, user: str, timeout: Optional[int] = None) -> Tuple[bool, str]:
@@ -67,21 +75,22 @@ def _series_table(recent: List[Tuple[str, float]]) -> str:
     return "\n".join(f"  {t}: {int(c):,} req" for t, c in recent) or "  (no recent data)"
 
 
-def review_spike(spike: dict) -> Review:
-    """Ask Qwen whether a detected spike is abnormal."""
+def review_spike(spike: dict, kind: str = "l7ddos") -> Review:
+    """Ask Qwen whether a detected mitigation spike is a significant attack."""
+    metric = _metric_label(kind)
     user = (
-        "A traffic spike was detected on the Cloudflare Security Analytics "
-        f"(L7 DDoS) chart for zone '{config.cf_zone}'.\n\n"
+        f"An L7 DDoS mitigation spike was detected for zone '{config.cf_zone}'.\n"
+        f"All counts below are {metric}, per 5-minute bucket.\n\n"
         f"Spike bucket time (UTC): {spike.get('ts')}\n"
-        f"Spike request count: {int(spike.get('count', 0)):,}\n"
-        f"Recent baseline mean: {spike.get('baseline_mean')}\n"
+        f"Mitigated requests in the spike bucket: {int(spike.get('count', 0)):,}\n"
+        f"Recent baseline mean: {spike.get('baseline_mean')} (near-zero = no attack normally)\n"
         f"Recent baseline std dev: {spike.get('baseline_std')}\n"
-        f"Alert threshold (mean + N*std): {spike.get('threshold')}\n"
+        f"Alert threshold: {spike.get('threshold')}\n"
         f"Spike is ~{spike.get('ratio')}x the baseline.\n\n"
-        "Recent buckets leading into the spike:\n"
+        "Recent buckets leading into the spike (mitigated requests):\n"
         f"{_series_table(spike.get('recent', []))}\n\n"
-        "Is this spike abnormal / a likely attack? Give a one-paragraph "
-        "assessment, then the verdict line."
+        "Assess whether this is a significant L7 DDoS attack (ABNORMAL) or a "
+        "minor/benign mitigation (NORMAL). One paragraph, then the verdict line."
     )
     ok, content = _chat(_ANALYST_SYSTEM, user)
     verdict = "UNKNOWN"
@@ -98,18 +107,22 @@ def review_spike(spike: dict) -> Review:
     return Review(verdict=verdict, explanation=content, ok=ok)
 
 
-def explain_current(summary: str, recent: List[Tuple[str, float]]) -> str:
+def explain_current(summary: str, recent: List[Tuple[str, float]], kind: str = "l7ddos") -> str:
     """Explain the current state of the chart for the /mo command."""
+    metric = _metric_label(kind)
     system = (
-        "You are a Cloudflare Layer-7 DDoS security analyst. In 2-4 short "
-        "sentences, explain the current traffic situation for a zone to a "
-        "non-expert: overall level, any recent spikes or anomalies, and "
-        "whether it looks like normal traffic or a possible attack."
+        "You are a Cloudflare Layer-7 DDoS security analyst. The numbers are "
+        f"{metric}, per 5-minute bucket (near-zero = no attack; a spike = an "
+        "attack Cloudflare mitigated). In 2-4 short sentences, explain the "
+        "current situation to a non-expert: how much attack traffic was "
+        "mitigated recently, any notable spikes, and whether it looks like a "
+        "significant attack or just minor/benign mitigation. Never say there "
+        "were 'no mitigations' -- the numbers ARE the mitigations."
     )
     user = (
         f"Zone: {config.cf_zone}\n"
         f"Summary: {summary}\n\n"
-        "Recent request buckets (time: count):\n"
+        f"Recent buckets (time: {metric}):\n"
         f"{_series_table(recent)}\n\n"
         "Explain what this chart is showing right now."
     )
