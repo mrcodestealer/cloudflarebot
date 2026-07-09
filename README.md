@@ -161,7 +161,7 @@ A ready template is in [`cloudflarebot.service`](cloudflarebot.service). The
 easiest install auto-fills the correct paths — run from the repo directory:
 
 ```bash
-DIR=$(pwd); PY=$(which python)
+DIR=$(pwd); PY=$(which python); GIT=$(command -v git)
 sudo tee /etc/systemd/system/cloudflarebot.service >/dev/null <<EOF
 [Unit]
 Description=Cloudflare L7 DDoS spike monitor (Lark bot)
@@ -170,6 +170,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$DIR
+ExecStartPre=-$GIT -C $DIR pull origin main
 ExecStart=$PY $DIR/main.py
 Environment=HOME=$HOME
 Environment=PYTHONUNBUFFERED=1
@@ -182,12 +183,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now cloudflarebot.service
 ```
 
+The `ExecStartPre` line means **every `systemctl restart` also `git pull`s the
+latest code** first (the `-` prefix keeps startup working even if offline).
+
 Manage it:
 
 ```bash
-systemctl restart cloudflarebot.service
+systemctl restart cloudflarebot.service     # pulls latest + restarts
 systemctl status  cloudflarebot.service
-journalctl -u cloudflarebot.service -f      # live logs
+journalctl -u cloudflarebot.service -f       # live logs
+```
+
+**When dependencies change** (new package in `requirements.txt`), a plain
+restart won't install them — use the one-shot deploy script instead:
+
+```bash
+bash deploy.sh      # git pull + pip install -r requirements.txt + restart
 ```
 
 ---
