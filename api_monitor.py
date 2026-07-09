@@ -71,6 +71,7 @@ class ApiMonitor(threading.Thread):
         )
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
+        from cards import info_card
         from qwen_client import explain_current
 
         self.lark.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
@@ -84,11 +85,15 @@ class ApiMonitor(threading.Thread):
         peak_ts = max(series, key=lambda p: p[1])[0] if series else None
         title = f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)"
         png = render_series_png(series, title, highlight_ts=peak_ts)
+        image_key = self.lark.upload_image(png) if png else None
         explanation = explain_current(summary, series[-12:])
 
-        if png:
-            self.lark.send_image(chat_id, png)
-        self.lark.send_text(chat_id, f"📊 {title}\n{summary}\n\n{explanation}", message_id)
+        card = info_card(f"📊 {title}", summary, explanation, image_key=image_key, template="blue")
+        if not self.lark.send_card(chat_id, card):
+            # Fallback to image + text if the card is rejected.
+            if png:
+                self.lark.send_image(chat_id, png)
+            self.lark.send_text(chat_id, f"📊 {title}\n{summary}\n\n{explanation}", message_id)
         self.lark.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:

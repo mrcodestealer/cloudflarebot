@@ -21,6 +21,8 @@ import sys
 import threading
 import time
 
+from cards import info_card, spike_card
+from chart import render_series_png
 from config import config
 from lark_bot import LarkBot
 from qwen_client import review_spike
@@ -82,13 +84,22 @@ def main() -> int:
 
     lark_bot = LarkBot(config)
 
-    def on_spike(spike, _monitor) -> None:
+    def on_spike(spike, monitor) -> None:
         """Review a new spike with Qwen and alert the group (off the monitor thread)."""
         def work() -> None:
             try:
                 review = review_spike(spike.as_dict())
-                lark_bot.send_text(config.lark_chat_id, _format_alert(spike, review))
-                log.info("alerted spike %s (verdict=%s)", spike.ts, review.verdict)
+                # Render the full 6h chart with the spike bucket marked.
+                series = monitor.snapshot_series() or spike.recent
+                png = render_series_png(
+                    series, f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)", highlight_ts=spike.ts
+                )
+                image_key = lark_bot.upload_image(png) if png else None
+                card = spike_card(spike, review, image_key)
+                if not lark_bot.send_card(config.lark_chat_id, card):
+                    # Fall back to plain text if the card is rejected.
+                    lark_bot.send_text(config.lark_chat_id, _format_alert(spike, review))
+                log.info("alerted spike %s (verdict=%s, chart=%s)", spike.ts, review.verdict, bool(image_key))
             except Exception:
                 log.exception("failed to alert spike %s", spike.ts)
 
@@ -113,11 +124,14 @@ def main() -> int:
         try:
             spike = _sample_spike()
             review = review_spike(spike.as_dict())
-            text = (
-                "🧪 TEST ALERT (sample data — not a real incident)\n\n"
-                + _format_alert(spike, review)
+            png = render_series_png(
+                spike.recent, f"{config.cf_zone} — Cloudflare L7 DDoS (sample)", highlight_ts=spike.ts
             )
-            lark_bot.send_text(config.lark_chat_id, text)
+            image_key = lark_bot.upload_image(png) if png else None
+            card = spike_card(spike, review, image_key)
+            card["header"]["title"]["content"] = "🧪 TEST — " + card["header"]["title"]["content"]
+            if not lark_bot.send_card(config.lark_chat_id, card):
+                lark_bot.send_text(config.lark_chat_id, "🧪 TEST ALERT\n\n" + _format_alert(spike, review))
             log.info("sent test alert (qwen ok=%s verdict=%s)", review.ok, review.verdict)
         except Exception:
             log.exception("test alert failed")

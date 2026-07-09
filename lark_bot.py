@@ -114,6 +114,27 @@ class LarkBot:
             return False
         return True
 
+    def send_card(self, chat_id: str, card: dict) -> bool:
+        """Send an interactive message card (colored header, fields, image)."""
+        body = (
+            CreateMessageRequestBody.builder()
+            .receive_id(chat_id)
+            .msg_type("interactive")
+            .content(json.dumps(card))
+            .build()
+        )
+        req = (
+            CreateMessageRequest.builder()
+            .receive_id_type("chat_id")
+            .request_body(body)
+            .build()
+        )
+        resp = self.client.im.v1.message.create(req)
+        if not resp.success():
+            log.error("send_card failed: code=%s msg=%s log_id=%s", resp.code, resp.msg, resp.get_log_id())
+            return False
+        return True
+
     def add_reaction(self, message_id: str, emoji_type: str) -> None:
         """Add an emoji reaction (e.g. 'OK' while working, 'DONE' when finished)."""
         try:
