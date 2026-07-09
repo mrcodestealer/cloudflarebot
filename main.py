@@ -15,6 +15,7 @@ handler only enqueues.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import sys
 import threading
@@ -24,6 +25,7 @@ from config import config
 from cloudflare_monitor import CloudflareMonitor
 from lark_bot import LarkBot
 from qwen_client import review_spike
+from spike_detector import Spike
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +54,25 @@ def _format_alert(spike, review) -> str:
     return "\n".join(lines)
 
 
+def _sample_spike() -> Spike:
+    """A realistic synthetic spike used by /testalert to preview the alert."""
+    now = datetime.datetime.now(datetime.timezone.utc).replace(second=0, microsecond=0)
+
+    def iso(dt: datetime.datetime) -> str:
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    recent = [(iso(now - datetime.timedelta(minutes=5 * i)), 1000 + (i % 4) * 40) for i in range(6, 0, -1)]
+    return Spike(
+        ts=iso(now),
+        count=92000,
+        baseline_mean=1050.0,
+        baseline_std=60.0,
+        threshold=1290.0,
+        ratio=87.6,
+        recent=recent,
+    )
+
+
 def main() -> int:
     problems = config.validate()
     if problems:
@@ -76,16 +97,46 @@ def main() -> int:
 
     monitor = CloudflareMonitor(on_spike=on_spike, lark_bot=lark_bot)
 
+    def run_test_alert(chat_id: str, message_id: str) -> None:
+        """/testalert — post a sample spike alert through the real format + Qwen path.
+
+        Runs on its own thread (never the monitor thread) so it can't stall live
+        monitoring even if Qwen is slow.
+        """
+        lark_bot.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
+        try:
+            spike = _sample_spike()
+            review = review_spike(spike.as_dict())
+            text = (
+                "🧪 TEST ALERT (sample data — not a real incident)\n\n"
+                + _format_alert(spike, review)
+            )
+            lark_bot.send_text(config.lark_chat_id, text)
+            log.info("sent test alert (qwen ok=%s verdict=%s)", review.ok, review.verdict)
+        except Exception:
+            log.exception("test alert failed")
+            try:
+                lark_bot.send_text(chat_id, "⚠️ /testalert failed: internal error.", message_id)
+            except Exception:
+                pass
+        finally:
+            lark_bot.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
+
     def command_handler(command: str, args: str, chat_id: str, message_id: str) -> None:
         """Runs on the WS thread — keep it non-blocking."""
         if command in _MO_ALIASES:
             monitor.submit_command(command, args, chat_id, message_id)
+        elif command in ("testalert", "test"):
+            threading.Thread(
+                target=run_test_alert, args=(chat_id, message_id), name="test-alert", daemon=True
+            ).start()
         else:
             def reply() -> None:
                 lark_bot.send_text(
                     chat_id,
-                    f"Unknown command '/{command}'. Tag me with /mo for a live "
-                    f"chart snapshot + AI review.",
+                    f"Unknown command '/{command}'.\n"
+                    f"• /mo — live chart screenshot + AI review\n"
+                    f"• /testalert — post a sample spike alert",
                     message_id,
                 )
             threading.Thread(target=reply, daemon=True).start()

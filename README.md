@@ -158,6 +158,9 @@ journalctl -u cloudflarebot -f
   baseline it is, and Qwen's `ABNORMAL` / `NORMAL` verdict + explanation.
 - **On-demand:** in the group, **@OSE Cloudflare Bot /mo** →
   👌 reaction → screenshot of the live chart + AI explanation → ✅ reaction.
+- **Test the alert format:** **@OSE Cloudflare Bot /testalert** → 👌 → posts a
+  clearly-labelled **sample** spike alert (runs the real formatting + Qwen path
+  on synthetic data, so it works even before any real spike) → ✅.
 
 ## How spike detection works
 
