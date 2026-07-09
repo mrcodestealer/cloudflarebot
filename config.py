@@ -81,6 +81,10 @@ class Config:
     poll_interval_seconds: int = field(default_factory=lambda: _int("POLL_INTERVAL_SECONDS", 30))
     state_dir: str = field(default_factory=lambda: os.getenv("STATE_DIR", "state"))
 
+    # Display timezone (Cloudflare data is UTC; shown in this offset). Default GMT+8.
+    display_tz_offset: float = field(default_factory=lambda: _float("DISPLAY_TZ_OFFSET", 8.0))
+    display_tz_label: str = field(default_factory=lambda: os.getenv("DISPLAY_TZ_LABEL", "GMT+8"))
+
     def validate(self) -> list[str]:
         """Return a list of human-readable problems with the configuration."""
         problems = []

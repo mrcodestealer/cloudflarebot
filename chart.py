@@ -17,20 +17,12 @@ try:
     matplotlib.use("Agg")  # headless backend
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
-    from datetime import datetime
     _HAVE_MPL = True
 except Exception:  # pragma: no cover
     _HAVE_MPL = False
 
-
-def _parse(ts: str):
-    from datetime import datetime
-    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            return datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    return None
+from config import config
+from timeutil import to_local_dt as _parse  # plots in the display timezone
 
 
 def render_series_png(
@@ -41,9 +33,15 @@ def render_series_png(
     """Render (iso_ts, count) points to PNG bytes. None if matplotlib missing."""
     if not _HAVE_MPL or not series:
         return None
+    # Convert to display-tz and drop tzinfo so matplotlib labels the local clock
+    # time literally (its date formatter otherwise renders in UTC).
+    def _naive_local(ts: str):
+        dt = _parse(ts)
+        return dt.replace(tzinfo=None) if dt is not None else None
+
     xs, ys = [], []
     for ts, c in series:
-        dt = _parse(ts)
+        dt = _naive_local(ts)
         if dt is not None:
             xs.append(dt)
             ys.append(c)
@@ -55,12 +53,13 @@ def render_series_png(
     ax.fill_between(xs, ys, color="#f6821f", alpha=0.15)
 
     if highlight_ts:
-        hdt = _parse(highlight_ts)
+        hdt = _naive_local(highlight_ts)
         if hdt is not None:
             ax.axvline(hdt, color="#d64545", linestyle="--", linewidth=1.2)
 
     ax.set_title(title, fontsize=12, fontweight="bold")
     ax.set_ylabel("Requests / 5 min")
+    ax.set_xlabel(f"Time ({config.display_tz_label})")
     ax.grid(True, alpha=0.25)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     fig.autofmt_xdate()

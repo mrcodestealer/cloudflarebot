@@ -41,10 +41,11 @@ _VERDICT_ICON = {"ABNORMAL": "🚨", "NORMAL": "✅", "UNKNOWN": "⚠️"}
 
 
 def _format_alert(spike, review) -> str:
+    from timeutil import fmt as fmt_ts
     icon = _VERDICT_ICON.get(review.verdict, "⚠️")
     lines = [
         f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}",
-        f"• Time (UTC): {spike.ts}",
+        f"• Time: {fmt_ts(spike.ts)}",
         f"• Requests: {int(spike.count):,} in one bucket",
         f"• Baseline: {int(spike.baseline_mean):,} avg (±{int(spike.baseline_std):,}), "
         f"~{spike.ratio}× normal",

@@ -72,16 +72,18 @@ def _chat(system: str, user: str, timeout: Optional[int] = None) -> Tuple[bool, 
 
 
 def _series_table(recent: List[Tuple[str, float]]) -> str:
-    return "\n".join(f"  {t}: {int(c):,} req" for t, c in recent) or "  (no recent data)"
+    from timeutil import fmt as fmt_ts
+    return "\n".join(f"  {fmt_ts(t, label=False)}: {int(c):,}" for t, c in recent) or "  (no recent data)"
 
 
 def review_spike(spike: dict, kind: str = "l7ddos") -> Review:
     """Ask Qwen whether a detected mitigation spike is a significant attack."""
+    from timeutil import fmt as fmt_ts
     metric = _metric_label(kind)
     user = (
         f"An L7 DDoS mitigation spike was detected for zone '{config.cf_zone}'.\n"
-        f"All counts below are {metric}, per 5-minute bucket.\n\n"
-        f"Spike bucket time (UTC): {spike.get('ts')}\n"
+        f"All counts below are {metric}, per 5-minute bucket. Times are {config.display_tz_label}.\n\n"
+        f"Spike bucket time: {fmt_ts(spike.get('ts'))}\n"
         f"Mitigated requests in the spike bucket: {int(spike.get('count', 0)):,}\n"
         f"Recent baseline mean: {spike.get('baseline_mean')} (near-zero = no attack normally)\n"
         f"Recent baseline std dev: {spike.get('baseline_std')}\n"

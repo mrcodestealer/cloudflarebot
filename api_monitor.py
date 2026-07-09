@@ -62,12 +62,13 @@ class ApiMonitor(threading.Thread):
         series = self.snapshot_series()
         if not series:
             return "no data captured yet"
+        from timeutil import fmt as fmt_ts
         latest_ts, latest = series[-1]
         peak_ts, peak = max(series, key=lambda p: p[1])
         label = "L7 DDoS mitigations" if self._kind == "l7ddos" else "total requests"
         return (
-            f"{label}: latest {int(latest):,} ({latest_ts}); "
-            f"6h peak {int(peak):,} ({peak_ts}); {len(series)} buckets"
+            f"{label}: latest {int(latest):,} ({fmt_ts(latest_ts)}); "
+            f"6h peak {int(peak):,} ({fmt_ts(peak_ts)}); {len(series)} buckets"
         )
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
