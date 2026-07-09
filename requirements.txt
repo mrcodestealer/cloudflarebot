@@ -1,0 +1,5 @@
+# Cloudflare spike-monitor Lark bot
+lark-oapi>=1.6.9
+playwright>=1.59.0
+requests>=2.32.0
+python-dotenv>=1.0.0

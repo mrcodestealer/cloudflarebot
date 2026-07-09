@@ -1,0 +1,25 @@
+# Secrets / local config
+.env
+
+# Playwright persistent browser profile & captured debug data
+.cf_profile/
+cf_debug/
+*.session.json
+
+# Runtime state
+state/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
