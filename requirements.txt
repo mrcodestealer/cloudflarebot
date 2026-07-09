@@ -1,5 +1,9 @@
 # Cloudflare spike-monitor Lark bot
 lark-oapi>=1.6.9
 playwright>=1.59.0
+# Undetected, drop-in Playwright fork to pass Cloudflare's managed challenge
+patchright>=1.52.0
+# Virtual display so headful Chrome runs on a headless server (needs system Xvfb)
+pyvirtualdisplay>=3.0
 requests>=2.32.0
 python-dotenv>=1.0.0

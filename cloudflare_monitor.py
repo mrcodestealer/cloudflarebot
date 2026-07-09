@@ -24,8 +24,16 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
+from browser import (
+    DRIVER,
+    PWTimeout,
+    challenge_active,
+    has_clearance,
+    persistent_context_kwargs,
+    start_virtual_display,
+    sync_playwright,
+    wait_for_challenge_clear,
+)
 from config import config
 from spike_detector import Spike, SpikeDetector
 
@@ -160,6 +168,7 @@ class CloudflareMonitor(threading.Thread):
         self._running.set()
         self._page = None
         self._ctx = None
+        self._display = None
 
     # ------------------------------------------------------------- public API
     def submit_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:
@@ -190,21 +199,7 @@ class CloudflareMonitor(threading.Thread):
 
     # --------------------------------------------------------------- browser
     def _launch(self, p):
-        launch_kwargs = dict(
-            user_data_dir=".cf_profile",
-            headless=config.cf_headless,
-            viewport={"width": 1600, "height": 900},
-            # --no-sandbox is required when running as root (e.g. on the server);
-            # --disable-dev-shm-usage avoids crashes on small /dev/shm.
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        if config.cf_chromium_path:
-            launch_kwargs["executable_path"] = config.cf_chromium_path
-        self._ctx = p.chromium.launch_persistent_context(**launch_kwargs)
+        self._ctx = p.chromium.launch_persistent_context(**persistent_context_kwargs(config))
         self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
         self._page.on("response", self._on_response)
 
@@ -270,16 +265,26 @@ class CloudflareMonitor(threading.Thread):
             except Exception:
                 pass
 
+    def _pass_challenge(self) -> None:
+        """Wait out a Cloudflare 'Just a moment...' managed challenge if present."""
+        if challenge_active(self._page):
+            log.info("Cloudflare challenge detected — waiting for it to clear...")
+            cleared = wait_for_challenge_clear(self._page, self._ctx, timeout=45)
+            log.info("challenge cleared=%s  cf_clearance=%s", cleared, has_clearance(self._ctx))
+
     def _open_analytics(self) -> None:
         self._page.goto(config.cf_analytics_url, wait_until="domcontentloaded", timeout=60000)
+        self._pass_challenge()
         self._login_if_needed()
         # After login we may need to re-open the analytics URL.
         if "security/analytics" not in self._page.url:
             self._page.goto(config.cf_analytics_url, wait_until="domcontentloaded", timeout=60000)
+            self._pass_challenge()
         try:
             self._page.wait_for_load_state("networkidle", timeout=30000)
         except PWTimeout:
             pass
+        log.info("analytics page ready at %s", self._page.url)
         self._enable_live_data()
 
     def _reload(self) -> None:
@@ -360,13 +365,24 @@ class CloudflareMonitor(threading.Thread):
         is logged and the whole Playwright session is torn down and rebuilt after
         a short back-off, until stop() is called.
         """
-        while self._running.is_set():
-            try:
-                self._run_session()
-            except Exception:
-                log.exception("monitor session crashed; relaunching in 15s")
-                if self._running.is_set():
-                    time.sleep(15)
+        # Headful needs a display; start one virtual display for the whole run.
+        if not config.cf_headless:
+            self._display = start_virtual_display()
+
+        try:
+            while self._running.is_set():
+                try:
+                    self._run_session()
+                except Exception:
+                    log.exception("monitor session crashed; relaunching in 15s")
+                    if self._running.is_set():
+                        time.sleep(15)
+        finally:
+            if self._display is not None:
+                try:
+                    self._display.stop()
+                except Exception:
+                    pass
 
     def _run_session(self) -> None:
         with sync_playwright() as p:
