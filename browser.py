@@ -90,11 +90,29 @@ def has_clearance(context) -> bool:
         return False
 
 
-def wait_for_challenge_clear(page, context, timeout: int = 45) -> bool:
-    """Poll up to `timeout`s for the managed challenge to auto-solve. True if cleared."""
+def wait_for_challenge_clear(page, context, timeout: int = 60) -> bool:
+    """Poll up to `timeout`s for the managed challenge to clear. True if cleared.
+
+    If Cloudflare grants the cf_clearance cookie but the interstitial doesn't
+    advance (the client redirect sometimes doesn't fire under automation), we
+    reload the page — with the cookie now present the real content usually loads.
+    """
     deadline = time.time() + timeout
+    reloads = 0
     while time.time() < deadline:
         if not challenge_active(page):
             return True
-        time.sleep(1.0)
+        if has_clearance(context) and reloads < 3:
+            time.sleep(3)
+            if not challenge_active(page):
+                return True
+            log.info("cf_clearance granted but still on interstitial — reloading (%d)", reloads + 1)
+            try:
+                page.reload(wait_until="domcontentloaded")
+            except Exception:
+                pass
+            reloads += 1
+            time.sleep(3)
+        else:
+            time.sleep(1.0)
     return not challenge_active(page)
