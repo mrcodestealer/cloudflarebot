@@ -160,6 +160,7 @@ class CloudflareMonitor(threading.Thread):
             min_floor=config.spike_min_floor,
             warmup=config.spike_warmup,
             state_path=f"{config.state_dir}/spikes.json",
+            prime_grace_minutes=config.spike_prime_grace_minutes,
         )
         self._series: Dict[str, float] = {}
         self._last_capture = 0.0

@@ -9,17 +9,28 @@ their bucket timestamp and persisted to disk, so:
   * a brand-new spike is always alerted, even right after a restart.
 
 On the very first run (no state yet) we "prime" on the history already on the
-chart: every existing spike bucket is recorded as seen *without* alerting,
-so we don't spam the group with hours-old peaks -- except the most recent
-bucket, which stays eligible so an attack in progress at startup still fires.
+chart: hours-old spike buckets are recorded as seen *without* alerting (no
+spam), but any spike within the last ``prime_grace_minutes`` still fires -- so
+if the bot restarts during or seconds after an attack, that attack is NOT
+missed.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import statistics
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Sequence, Tuple
+
+
+def _parse_ts(ts: str) -> Optional[datetime.datetime]:
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(ts, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 @dataclass
@@ -45,6 +56,7 @@ class SpikeDetector:
         warmup: int = 6,
         state_path: str = "state/spikes.json",
         max_remembered: int = 500,
+        prime_grace_minutes: float = 20.0,
     ) -> None:
         self.std_multiplier = std_multiplier
         self.baseline_window = baseline_window
@@ -52,6 +64,7 @@ class SpikeDetector:
         self.warmup = warmup
         self.state_path = state_path
         self.max_remembered = max_remembered
+        self.prime_grace_minutes = prime_grace_minutes
 
         self._alerted: set[str] = set()
         self._initialized: bool = False
@@ -138,8 +151,22 @@ class SpikeDetector:
         latest_ts = max(ts for ts, _ in series)
 
         if not self._initialized:
-            # Prime: swallow historical spikes, but let the newest bucket fire.
-            new = [s for s in spikes if s.ts >= latest_ts]
+            # Prime: swallow hours-old spikes (no spam), but still fire any spike
+            # within the last `prime_grace_minutes` so a restart during/just after
+            # an attack does not miss it.
+            latest_dt = _parse_ts(latest_ts)
+            cutoff = (
+                latest_dt - datetime.timedelta(minutes=self.prime_grace_minutes)
+                if latest_dt is not None else None
+            )
+
+            def _recent(s: Spike) -> bool:
+                sdt = _parse_ts(s.ts)
+                if cutoff is not None and sdt is not None:
+                    return sdt >= cutoff
+                return s.ts >= latest_ts  # fallback: only the newest bucket
+
+            new = [s for s in spikes if _recent(s) and s.ts not in self._alerted]
             for s in spikes:
                 self._alerted.add(s.ts)
             self._initialized = True

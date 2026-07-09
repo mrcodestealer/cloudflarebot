@@ -73,6 +73,9 @@ class Config:
     spike_baseline_window: int = field(default_factory=lambda: _int("SPIKE_BASELINE_WINDOW", 20))
     spike_min_floor: float = field(default_factory=lambda: _float("SPIKE_MIN_FLOOR", 1000))
     spike_warmup: int = field(default_factory=lambda: _int("SPIKE_WARMUP", 6))
+    # On startup, still alert spikes within this many minutes (so a restart during
+    # or right after an attack doesn't swallow it as "history").
+    spike_prime_grace_minutes: float = field(default_factory=lambda: _float("SPIKE_PRIME_GRACE_MIN", 20.0))
 
     # Monitor loop
     poll_interval_seconds: int = field(default_factory=lambda: _int("POLL_INTERVAL_SECONDS", 30))
