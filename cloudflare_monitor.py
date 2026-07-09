@@ -190,12 +190,21 @@ class CloudflareMonitor(threading.Thread):
 
     # --------------------------------------------------------------- browser
     def _launch(self, p):
-        self._ctx = p.chromium.launch_persistent_context(
+        launch_kwargs = dict(
             user_data_dir=".cf_profile",
             headless=config.cf_headless,
             viewport={"width": 1600, "height": 900},
-            args=["--disable-blink-features=AutomationControlled"],
+            # --no-sandbox is required when running as root (e.g. on the server);
+            # --disable-dev-shm-usage avoids crashes on small /dev/shm.
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
+        if config.cf_chromium_path:
+            launch_kwargs["executable_path"] = config.cf_chromium_path
+        self._ctx = p.chromium.launch_persistent_context(**launch_kwargs)
         self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
         self._page.on("response", self._on_response)
 

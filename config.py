@@ -39,6 +39,9 @@ class Config:
     cf_zone: str = field(default_factory=lambda: os.getenv("CF_ZONE", ""))
     cf_analytics_url: str = field(default_factory=lambda: os.getenv("CF_ANALYTICS_URL", ""))
     cf_headless: bool = field(default_factory=lambda: _bool("CF_HEADLESS", True))
+    # Optional: path to a system Chromium, used if the bundled build won't run
+    # (e.g. glibc too old on RHEL8/al8). Empty = use Playwright's bundled browser.
+    cf_chromium_path: str = field(default_factory=lambda: os.getenv("CF_CHROMIUM_PATH", ""))
 
     # Lark / Feishu
     lark_app_id: str = field(default_factory=lambda: os.getenv("LARK_APP_ID", ""))
