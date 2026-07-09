@@ -345,47 +345,63 @@ class CloudflareMonitor(threading.Thread):
 
     # ------------------------------------------------------------------- loop
     def run(self) -> None:
+        """Supervisor: keep the browser session alive; relaunch on any crash.
+
+        Monitoring must never silently stop, so a failure in launch/login/capture
+        is logged and the whole Playwright session is torn down and rebuilt after
+        a short back-off, until stop() is called.
+        """
+        while self._running.is_set():
+            try:
+                self._run_session()
+            except Exception:
+                log.exception("monitor session crashed; relaunching in 15s")
+                if self._running.is_set():
+                    time.sleep(15)
+
+    def _run_session(self) -> None:
         with sync_playwright() as p:
             self._launch(p)
             try:
                 self._open_analytics()
             except Exception:
-                log.exception("failed to open analytics page")
+                log.exception("failed to open analytics page (will keep trying via watchdog)")
 
             # Prime: capture initial data, then seed the detector so historical
             # peaks already on the chart are not alerted as if brand new.
             self._page.wait_for_timeout(8000)
             self.detector.find_new_spikes(self.snapshot_series())
+            self._last_capture = time.time()  # grace period before the stale watchdog
             log.info("monitor primed with %d buckets", len(self._series))
 
             last_eval = time.time()
             poll = config.poll_interval_seconds
             stale_after = max(60, poll * 3)
 
-            while self._running.is_set():
-                self._drain_commands()
-                try:
-                    self._page.wait_for_timeout(1000)  # pumps Playwright events
-                except Exception:
-                    log.exception("page pump error; attempting reload")
-                    self._reload()
-
-                now = time.time()
-                if now - last_eval >= poll:
-                    last_eval = now
-                    try:
-                        new_spikes = self.detector.find_new_spikes(self.snapshot_series())
-                        for s in new_spikes:
-                            log.warning("NEW SPIKE: %s = %s req (%.1fx baseline)", s.ts, int(s.count), s.ratio)
-                            self.on_spike(s, self)
-                    except Exception:
-                        log.exception("spike evaluation error")
-
-                if now - self._last_capture > stale_after:
-                    self._reload()
-                    self._last_capture = time.time()  # avoid reload storm
-
             try:
-                self._ctx.close()
-            except Exception:
-                pass
+                while self._running.is_set():
+                    self._drain_commands()
+                    # Pumps Playwright events (live GraphQL responses). A failure
+                    # here means the page/context is broken -> bubble up to the
+                    # supervisor for a clean relaunch.
+                    self._page.wait_for_timeout(1000)
+
+                    now = time.time()
+                    if now - last_eval >= poll:
+                        last_eval = now
+                        try:
+                            new_spikes = self.detector.find_new_spikes(self.snapshot_series())
+                            for s in new_spikes:
+                                log.warning("NEW SPIKE: %s = %s req (%.1fx baseline)", s.ts, int(s.count), s.ratio)
+                                self.on_spike(s, self)
+                        except Exception:
+                            log.exception("spike evaluation error")
+
+                    if now - self._last_capture > stale_after:
+                        self._reload()
+                        self._last_capture = time.time()  # avoid reload storm
+            finally:
+                try:
+                    self._ctx.close()
+                except Exception:
+                    pass
