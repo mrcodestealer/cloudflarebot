@@ -66,7 +66,7 @@ class Config:
     # Qwen / Ollama
     ollama_host: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"))
     qwen_model: str = field(default_factory=lambda: os.getenv("QWEN_MODEL", "qwen3.6:35b-a3b"))
-    qwen_timeout: int = field(default_factory=lambda: _int("QWEN_TIMEOUT", 120))
+    qwen_timeout: int = field(default_factory=lambda: _int("QWEN_TIMEOUT", 300))
 
     # Spike detection
     spike_std_multiplier: float = field(default_factory=lambda: _float("SPIKE_STD_MULTIPLIER", 4.0))

@@ -55,7 +55,10 @@ def _chat(system: str, user: str, timeout: Optional[int] = None) -> Tuple[bool, 
             {"role": "user", "content": user},
         ],
         "stream": False,
-        "options": {"temperature": 0.2},
+        # Keep the model loaded between calls (avoids slow cold starts) and cap
+        # output length so responses come back quickly.
+        "keep_alive": "30m",
+        "options": {"temperature": 0.2, "num_predict": 400},
     }
     try:
         resp = requests.post(url, json=payload, timeout=timeout or config.qwen_timeout)

@@ -69,61 +69,44 @@ def _iso(dt: datetime.datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _query(zone_tag: str, start: str, end: str, with_source: bool) -> str:
-    dims = "datetimeFiveMinutes securitySource" if with_source else "datetimeFiveMinutes"
+def _query(zone_tag: str, start: str, end: str) -> str:
     return (
         "{ viewer { zones(filter: {zoneTag: \"" + zone_tag + "\"}) { "
         "httpRequestsAdaptiveGroups(limit: 10000, filter: {datetime_geq: \"" + start + "\", "
         "datetime_leq: \"" + end + "\"}, orderBy: [datetimeFiveMinutes_ASC]) { "
-        "count dimensions { " + dims + " } } } } }"
+        "count dimensions { datetimeFiveMinutes securitySource } } } } }"
     )
 
 
 def fetch_series(hours: int = 6) -> Dict:
-    """Return the L7 DDoS timeseries for the last `hours`.
+    """Return the L7 DDoS mitigation timeseries for the last `hours`.
 
-    Returns {"series": [(iso_ts, count), ...], "kind": "l7ddos"|"total",
-             "total": [(iso_ts, count), ...]}.
-    `series` is what we monitor for spikes; when securitySource grouping is
-    available we use the l7ddos-attributed counts (matching the dashboard's
-    mitigation-service=l7ddos view), otherwise we fall back to total requests.
+    Returns {"series": [(iso_ts, mitigated_count), ...], "kind": "l7ddos"}.
+
+    We group by 5-minute bucket + securitySource and keep ONLY the l7ddos rows
+    (matching the dashboard's mitigation-service=l7ddos view), 0-filling buckets
+    with no mitigation. We never monitor total zone traffic — that would false-
+    alarm on normal load. On any API error this raises, so the caller keeps its
+    last-known series and skips the poll rather than alerting on bad data.
     """
     zone_tag = resolve_zone_tag()
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     start = _iso(now - datetime.timedelta(hours=hours))
     end = _iso(now)
 
-    rows = None
-    with_source = True
-    try:
-        data = _graphql(_query(zone_tag, start, end, with_source=True))
-        rows = data["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
-    except Exception as exc:
-        log.warning("securitySource query failed (%s); retrying without it", exc)
-        with_source = False
-        data = _graphql(_query(zone_tag, start, end, with_source=False))
-        rows = data["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
+    data = _graphql(_query(zone_tag, start, end))
+    rows = data["viewer"]["zones"][0]["httpRequestsAdaptiveGroups"]
 
-    total: Dict[str, float] = {}
     l7ddos: Dict[str, float] = {}
+    buckets: set[str] = set()
     for row in rows:
         dims = row.get("dimensions", {})
         ts = dims.get("datetimeFiveMinutes")
         if not ts:
             continue
-        cnt = float(row.get("count", 0) or 0)
-        total[ts] = total.get(ts, 0.0) + cnt
-        if with_source and dims.get("securitySource") in _MITIGATING_SOURCES:
-            l7ddos[ts] = l7ddos.get(ts, 0.0) + cnt
+        buckets.add(ts)
+        if dims.get("securitySource") in _MITIGATING_SOURCES:
+            l7ddos[ts] = l7ddos.get(ts, 0.0) + float(row.get("count", 0) or 0)
 
-    total_series = sorted(total.items())
-    if with_source:
-        # Ensure every bucket exists in the l7ddos series (0 when no mitigation).
-        l7_series = [(ts, l7ddos.get(ts, 0.0)) for ts, _ in total_series]
-        kind = "l7ddos"
-        series = l7_series
-    else:
-        kind = "total"
-        series = total_series
-
-    return {"series": series, "kind": kind, "total": total_series}
+    series = [(ts, l7ddos.get(ts, 0.0)) for ts in sorted(buckets)]
+    return {"series": series, "kind": "l7ddos"}
