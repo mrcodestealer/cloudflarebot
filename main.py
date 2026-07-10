@@ -143,7 +143,7 @@ def main() -> int:
         finally:
             lark_bot.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
 
-    def command_handler(command: str, args: str, chat_id: str, message_id: str) -> None:
+    def command_handler(command: str, args: str, chat_id: str, message_id: str, chat_type: str = "") -> None:
         """Runs on the WS thread — keep it non-blocking."""
         if command in _MO_ALIASES:
             monitor.submit_command(command, args, chat_id, message_id)
@@ -151,12 +151,16 @@ def main() -> int:
             threading.Thread(
                 target=run_test_alert, args=(chat_id, message_id), name="test-alert", daemon=True
             ).start()
+        elif chat_type == "group":
+            # Stay silent on unknown commands in a group (only tagged known
+            # commands like /mo get a reply — keeps the group uncluttered).
+            log.info("ignoring unknown group command '/%s'", command)
         else:
             def reply() -> None:
                 lark_bot.send_text(
                     chat_id,
                     f"Unknown command '/{command}'.\n"
-                    f"• /mo — live chart screenshot + AI review\n"
+                    f"• /mo — live chart + AI review\n"
                     f"• /testalert — post a sample spike alert",
                     message_id,
                 )

@@ -31,8 +31,8 @@ from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
 log = logging.getLogger("lark")
 
-# command handler signature: (command: str, args: str, chat_id: str, message_id: str)
-CommandHandler = Callable[[str, str, str, str], None]
+# command handler signature: (command, args, chat_id, message_id, chat_type)
+CommandHandler = Callable[[str, str, str, str, str], None]
 
 # Mention placeholders inside message text look like "@_user_1" / "@_bot_1" etc.
 _MENTION_PLACEHOLDER = re.compile(r"@_\w+")
@@ -184,12 +184,18 @@ class LarkBot:
             # Strip @mention placeholders (@_user_1 / @_bot_1 ...) to isolate the command.
             text = _MENTION_PLACEHOLDER.sub(" ", raw).strip()
 
-            # In a group, only act when the bot was @-mentioned. Lark only delivers
-            # group messages that mention the bot, so the presence of a mention is
-            # enough -- we do NOT hard-require an open_id match (the id form varies
-            # and an exact check silently drops legitimate commands).
-            if chat_type == "group" and not mentions:
-                return
+            # In a group, only act when THIS bot is the @-mentioned target.
+            # Other bots may share the group, so a mention of someone else must be
+            # ignored (otherwise multiple bots answer the same /mo).
+            if chat_type == "group":
+                if not mentions:
+                    return
+                bot_id = self.cfg.lark_bot_open_id
+                if bot_id:
+                    mentioned = [getattr(m.id, "open_id", None) for m in mentions if m.id]
+                    if bot_id not in mentioned:
+                        log.info("ignoring group msg: bot not the @target (mentioned=%s)", mentioned)
+                        return
 
             match = _COMMAND_RE.search(text)
             if match:
@@ -206,7 +212,7 @@ class LarkBot:
 
             log.info("dispatch command '/%s' from chat=%s (%s)", command, chat_id, chat_type)
             if self.command_handler:
-                self.command_handler(command, args, chat_id, message_id)
+                self.command_handler(command, args, chat_id, message_id, chat_type)
         except Exception:
             log.exception("error handling incoming message")
 
