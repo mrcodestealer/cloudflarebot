@@ -37,7 +37,7 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 _MO_ALIASES = {"mo", "monitor", "status", "chart"}
-_DEPLOY_ALIASES = {"deploy", "redeploy", "update", "pull"}
+_DEPLOY_ALIASES = {"deploy", "redeploy", "update", "pull", "git"}
 
 _VERDICT_ICON = {"ABNORMAL": "🚨", "NORMAL": "✅", "UNKNOWN": "⚠️"}
 
