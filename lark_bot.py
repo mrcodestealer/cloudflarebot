@@ -230,21 +230,36 @@ class LarkBot:
 
         Auto-reconnect is enabled by the SDK, so this survives network drops.
         """
-        # Reaction events (if the app subscribes to them) would otherwise log
-        # "processor not found"; register no-ops to keep the log clean.
+        # The Lark app is subscribed (at the app level, in the developer console)
+        # to event types this bot doesn't use — reactions, VC meetings, tasks,
+        # chat-access. Each unhandled event makes the SDK log an ERROR
+        # ("processor not found"), flooding the journal. Register no-ops for the
+        # known-noisy types. getattr keeps this tolerant of older SDK versions
+        # that lack some register method (skip instead of crashing at startup).
         def _ignore(_data) -> None:
             return None
 
-        handler = (
-            EventDispatcherHandler.builder(
-                self.cfg.lark_encrypt_key or "",
-                self.cfg.lark_verification_token or "",
-            )
-            .register_p2_im_message_receive_v1(self._on_message)
-            .register_p2_im_message_reaction_created_v1(_ignore)
-            .register_p2_im_message_reaction_deleted_v1(_ignore)
-            .build()
+        builder = EventDispatcherHandler.builder(
+            self.cfg.lark_encrypt_key or "",
+            self.cfg.lark_verification_token or "",
         )
+        builder.register_p2_im_message_receive_v1(self._on_message)
+        for _reg_name in (
+            "register_p2_im_message_reaction_created_v1",
+            "register_p2_im_message_reaction_deleted_v1",
+            "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1",
+            "register_p2_task_task_update_tenant_v1",
+            "register_p2_task_task_updated_v1",
+            "register_p2_task_task_comment_updated_v1",
+            "register_p2_vc_meeting_all_meeting_started_v1",
+            "register_p2_vc_meeting_all_meeting_ended_v1",
+        ):
+            _reg = getattr(builder, _reg_name, None)
+            if _reg is not None:
+                _reg(_ignore)
+            else:
+                log.info("SDK lacks %s; that event type will still log noise", _reg_name)
+        handler = builder.build()
         self._ws = lark.ws.Client(
             self.cfg.lark_app_id,
             self.cfg.lark_app_secret,
