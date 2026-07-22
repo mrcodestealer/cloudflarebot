@@ -78,7 +78,7 @@ class ApiMonitor(threading.Thread):
         )
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
-        from cards import info_card
+        from cards import mo_card
         from qwen_client import explain_current
 
         self.lark.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
@@ -95,7 +95,8 @@ class ApiMonitor(threading.Thread):
         image_key = self.lark.upload_image(png) if png else None
         explanation = explain_current(summary, series[-12:], kind=self._kind)
 
-        card = info_card(f"📊 {title}", summary, explanation, image_key=image_key, template="blue")
+        # Alert-style layout, but informational: blue and never @mentions anyone.
+        card = mo_card(series, explanation, image_key)
         if not self.lark.send_card(chat_id, card):
             # Fallback to image + text if the card is rejected.
             if png:

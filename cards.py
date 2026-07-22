@@ -89,24 +89,30 @@ def spike_card(
     return _card(template, f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}", elements)
 
 
-def info_card(
-    title: str,
-    summary: str,
-    explanation: str,
-    image_key: Optional[str] = None,
-    template: str = "blue",
-    test: bool = False,
-) -> dict:
-    if test:
-        template = "grey"
-        title = "🧪 " + title
+def mo_card(series: List[Tuple[str, float]], explanation: str, image_key: Optional[str] = None) -> dict:
+    """Status card for /mo — alert-style field layout, blue header, no @mention.
+
+    Shows the live state of the 6h L7 DDoS window the same way an alert does
+    (structured fields + chart + AI review), but as an informational card:
+    it never tags anyone.
+    """
+    title = f"📊 Cloudflare L7 DDoS — {config.cf_zone} (last 6h)"
+    if not series:
+        return _card("blue", title, [{"tag": "div", "text": _md("no data captured yet")}])
+    latest_ts, latest = series[-1]
+    peak_ts, peak = max(series, key=lambda p: p[1])
     elements = [
-        {"tag": "div", "text": _md(summary)},
+        {"tag": "div", "fields": [
+            {"is_short": True, "text": _md(f"**🕒 Latest**\n{fmt_ts(latest_ts)}")},
+            {"is_short": True, "text": _md(f"**📈 Latest count**\n{int(latest):,} req / 5-min")},
+            {"is_short": True, "text": _md(f"**🔺 6h Peak**\n{int(peak):,} @ {fmt_ts(peak_ts, label=False)}")},
+            {"is_short": True, "text": _md(f"**📊 Buckets**\n{len(series)} × 5-min")},
+        ]},
         _img_element(image_key, "6h L7 DDoS chart"),
     ]
-    # Only show the AI-review section when there is an actual explanation
-    # (empty = the model was unavailable; the card is fine without it).
     if explanation.strip():
         elements.append({"tag": "hr"})
         elements.append({"tag": "div", "text": _md(f"**🤖 AI review**\n{explanation.strip()}")})
-    return _card(template, title, elements)
+    return _card("blue", title, elements)
+
+

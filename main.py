@@ -22,7 +22,7 @@ import threading
 import time
 
 import deployer
-from cards import info_card, spike_card
+from cards import spike_card
 from chart import render_series_png
 from config import config
 from lark_bot import LarkBot
@@ -144,12 +144,18 @@ def main() -> int:
                 spike.recent, f"{config.cf_zone} — Cloudflare L7 DDoS (sample)", highlight_ts=spike.ts
             )
             image_key = lark_bot.upload_image(png) if png else None
-            card = spike_card(
-                spike, review, image_key,
-                mention_ids=config.alert_mention_open_ids,
-                mention_note=config.alert_mention_note,
-            )
+            # Tests never @mention anyone — only genuine spike alerts ping a human.
+            card = spike_card(spike, review, image_key)
             card["header"]["title"]["content"] = "🧪 TEST — " + card["header"]["title"]["content"]
+            if config.alert_mention_open_ids:
+                card["elements"].append({"tag": "hr"})
+                card["elements"].append({"tag": "div", "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"🔕 test — no one tagged (a real alert would @mention "
+                        f"{len(config.alert_mention_open_ids)}: {config.alert_mention_note})"
+                    ),
+                }})
             if not lark_bot.send_card(config.lark_chat_id, card):
                 lark_bot.send_text(config.lark_chat_id, "🧪 TEST ALERT\n\n" + _format_alert(spike, review))
             log.info("sent test alert (qwen ok=%s verdict=%s)", review.ok, review.verdict)
