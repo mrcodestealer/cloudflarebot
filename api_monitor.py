@@ -81,7 +81,7 @@ class ApiMonitor(threading.Thread):
         from cards import mo_card
         from qwen_client import explain_current
 
-        self.lark.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
+        working = self.lark.react_working(message_id)  # 👌 working
         try:
             self._poll()  # freshest data for the snapshot
         except Exception:
@@ -105,7 +105,7 @@ class ApiMonitor(threading.Thread):
             if explanation.strip():
                 text += f"\n\n{explanation.strip()}"
             self.lark.send_text(chat_id, text, message_id)
-        self.lark.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
+        self.lark.react_done(message_id, working)  # remove 👌, add ✅
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:
         try:

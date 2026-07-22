@@ -136,7 +136,7 @@ def main() -> int:
         Runs on its own thread (never the monitor thread) so it can't stall live
         monitoring even if Qwen is slow.
         """
-        lark_bot.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
+        working = lark_bot.react_working(message_id)  # 👌 working
         try:
             spike = _sample_spike()
             review = review_spike(spike.as_dict())
@@ -166,7 +166,7 @@ def main() -> int:
             except Exception:
                 pass
         finally:
-            lark_bot.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
+            lark_bot.react_done(message_id, working)  # remove 👌, add ✅
 
     def _reply_async(text: str, chat_id: str, message_id: str) -> None:
         threading.Thread(

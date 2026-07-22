@@ -71,7 +71,8 @@ def _clear_marker() -> None:
 
 def run_deploy(lark_bot, chat_id: str, message_id: str) -> None:
     """git pull + restart, reporting progress to the PM. Blocking -- call on a thread."""
-    lark_bot.add_reaction(message_id, config.lark_reaction_processing)  # 👌 working
+    working = lark_bot.react_working(message_id)  # 👌 working
+    reacted_done = False
     try:
         before = _git_head()
         try:
@@ -105,6 +106,10 @@ def run_deploy(lark_bot, chat_id: str, message_id: str) -> None:
         # Drop the marker first, then hand the restart to systemd. Once the new
         # process starts it posts the "back online" confirmation.
         _write_marker(chat_id, message_id, after)
+        # Mark done NOW, while still alive — the restart below kills this process,
+        # so a reaction left to `finally` could be lost.
+        lark_bot.react_done(message_id, working)  # remove 👌, add ✅
+        reacted_done = True
         try:
             subprocess.Popen(_restart_cmd(), cwd=REPO_DIR, start_new_session=True)
         except FileNotFoundError as exc:
@@ -124,7 +129,8 @@ def run_deploy(lark_bot, chat_id: str, message_id: str) -> None:
         except Exception:
             pass
     finally:
-        lark_bot.add_reaction(message_id, config.lark_reaction_done)  # ✅ processed
+        if not reacted_done:
+            lark_bot.react_done(message_id, working)  # remove 👌, add ✅
 
 
 def notify_if_redeployed(lark_bot) -> None:

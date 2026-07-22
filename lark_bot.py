@@ -24,6 +24,7 @@ from lark_oapi.api.im.v1 import (
     CreateMessageReactionRequestBody,
     CreateMessageRequest,
     CreateMessageRequestBody,
+    DeleteMessageReactionRequest,
     Emoji,
     P2ImMessageReceiveV1,
 )
@@ -135,8 +136,8 @@ class LarkBot:
             return False
         return True
 
-    def add_reaction(self, message_id: str, emoji_type: str) -> None:
-        """Add an emoji reaction (e.g. 'OK' while working, 'DONE' when finished)."""
+    def add_reaction(self, message_id: str, emoji_type: str) -> Optional[str]:
+        """Add an emoji reaction; return its reaction_id (needed to remove it)."""
         try:
             req = (
                 CreateMessageReactionRequest.builder()
@@ -151,8 +152,37 @@ class LarkBot:
             resp = self.client.im.v1.message_reaction.create(req)
             if not resp.success():
                 log.error("add_reaction(%s) failed: code=%s msg=%s", emoji_type, resp.code, resp.msg)
+                return None
+            return getattr(resp.data, "reaction_id", None)
         except Exception:  # never let a reaction failure break the flow
             log.exception("add_reaction(%s) raised", emoji_type)
+            return None
+
+    def remove_reaction(self, message_id: str, reaction_id: Optional[str]) -> None:
+        """Remove a previously-added reaction by its reaction_id (no-op if None)."""
+        if not reaction_id:
+            return
+        try:
+            req = (
+                DeleteMessageReactionRequest.builder()
+                .message_id(message_id)
+                .reaction_id(reaction_id)
+                .build()
+            )
+            resp = self.client.im.v1.message_reaction.delete(req)
+            if not resp.success():
+                log.error("remove_reaction failed: code=%s msg=%s", resp.code, resp.msg)
+        except Exception:
+            log.exception("remove_reaction raised")
+
+    def react_working(self, message_id: str) -> Optional[str]:
+        """React 'working' (👌). Returns the reaction_id to pass to react_done()."""
+        return self.add_reaction(message_id, self.cfg.lark_reaction_processing)
+
+    def react_done(self, message_id: str, working_reaction_id: Optional[str] = None) -> None:
+        """Mark finished: remove the 'working' (👌) reaction so only 'done' (✅) remains."""
+        self.remove_reaction(message_id, working_reaction_id)
+        self.add_reaction(message_id, self.cfg.lark_reaction_done)
 
     # ---------------------------------------------------------------- inbound
     @staticmethod
