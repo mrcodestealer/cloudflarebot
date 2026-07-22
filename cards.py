@@ -99,14 +99,12 @@ def mo_card(series: List[Tuple[str, float]], explanation: str, image_key: Option
     title = f"📊 Cloudflare L7 DDoS — {config.cf_zone} (last 6h)"
     if not series:
         return _card("blue", title, [{"tag": "div", "text": _md("no data captured yet")}])
-    latest_ts, latest = series[-1]
-    peak_ts, peak = max(series, key=lambda p: p[1])
+    latest_ts, _ = series[-1]
+    peak = max(c for _, c in series)
     elements = [
         {"tag": "div", "fields": [
-            {"is_short": True, "text": _md(f"**🕒 Latest**\n{fmt_ts(latest_ts)}")},
-            {"is_short": True, "text": _md(f"**📈 Latest count**\n{int(latest):,} req / 5-min")},
-            {"is_short": True, "text": _md(f"**🔺 6h Peak**\n{int(peak):,} @ {fmt_ts(peak_ts, label=False)}")},
-            {"is_short": True, "text": _md(f"**📊 Buckets**\n{len(series)} × 5-min")},
+            {"is_short": True, "text": _md(f"**🕒 Time**\n{fmt_ts(latest_ts)}")},
+            {"is_short": True, "text": _md(f"**🔺 6h Peak**\n{int(peak):,}")},
         ]},
         _img_element(image_key, "6h L7 DDoS chart"),
     ]
