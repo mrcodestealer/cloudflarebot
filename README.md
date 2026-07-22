@@ -213,6 +213,13 @@ bash deploy.sh      # git pull + pip install -r requirements.txt + restart
 - **Test the alert format:** **@OSE Cloudflare Bot /testalert** → 👌 → posts a
   clearly-labelled **sample** spike alert (runs the real formatting + Qwen path
   on synthetic data, so it works even before any real spike) → ✅.
+- **Deploy from chat (admin only):** in a **1:1 PM** with the bot, send **`/deploy`**
+  (aliases: `/redeploy`, `/update`, `/pull`). The bot runs `git pull --ff-only`,
+  reports the result, then restarts the service; when the new build is up it
+  replies **✅ Back online — deployed `<commit>`**. Only user open_ids in
+  `ADMIN_OPEN_IDS` are allowed — everyone else is refused. PM **`/whoami`** to get
+  your own open_id for that list. The restart uses `systemd-run` so it survives
+  the process being killed (override with `DEPLOY_RESTART_CMD`).
 
 ## How spike detection works
 

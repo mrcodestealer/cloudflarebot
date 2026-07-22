@@ -31,8 +31,8 @@ from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
 log = logging.getLogger("lark")
 
-# command handler signature: (command, args, chat_id, message_id, chat_type)
-CommandHandler = Callable[[str, str, str, str, str], None]
+# command handler signature: (command, args, chat_id, message_id, chat_type, sender_open_id)
+CommandHandler = Callable[[str, str, str, str, str, str], None]
 
 # Mention placeholders inside message text look like "@_user_1" / "@_bot_1" etc.
 _MENTION_PLACEHOLDER = re.compile(r"@_\w+")
@@ -171,6 +171,14 @@ class LarkBot:
             chat_type = msg.chat_type  # "group" | "p2p"
             mentions = msg.mentions or []
 
+            # Sender's user open_id (ou_...), used to authorize admin-only commands.
+            sender_open_id = ""
+            sender = getattr(data.event, "sender", None)
+            if sender is not None:
+                sender_id = getattr(sender, "sender_id", None)
+                if sender_id is not None:
+                    sender_open_id = getattr(sender_id, "open_id", "") or ""
+
             raw = self._extract_text(msg.content) if msg.message_type == "text" else ""
             # Log every received message so we can confirm events are arriving.
             log.info(
@@ -212,7 +220,7 @@ class LarkBot:
 
             log.info("dispatch command '/%s' from chat=%s (%s)", command, chat_id, chat_type)
             if self.command_handler:
-                self.command_handler(command, args, chat_id, message_id, chat_type)
+                self.command_handler(command, args, chat_id, message_id, chat_type, sender_open_id)
         except Exception:
             log.exception("error handling incoming message")
 

@@ -11,6 +11,8 @@ import logging
 import threading
 from typing import Callable, List, Tuple
 
+import requests
+
 import cloudflare_api
 from chart import render_series_png
 from config import config
@@ -34,8 +36,12 @@ class ApiMonitor(threading.Thread):
         )
         self._series: List[Tuple[str, float]] = []
         self._kind = "l7ddos"
-        self._running = threading.Event()
-        self._running.set()
+        # Stop *event*: clear while running, set to stop. The run loop sleeps via
+        # _stop.wait(poll), which blocks while the flag is False — i.e. it really
+        # waits the poll interval and wakes early only when stop() is called.
+        # (An inverted "running" event here would make wait() return instantly
+        # and hot-loop the Cloudflare API into 429s.)
+        self._stop = threading.Event()
 
     # ------------------------------------------------------------- public API
     def snapshot_series(self) -> List[Tuple[str, float]]:
@@ -49,7 +55,7 @@ class ApiMonitor(threading.Thread):
         ).start()
 
     def stop(self) -> None:
-        self._running.clear()
+        self._stop.set()
 
     # --------------------------------------------------------------- polling
     def _poll(self) -> None:
@@ -94,7 +100,10 @@ class ApiMonitor(threading.Thread):
             # Fallback to image + text if the card is rejected.
             if png:
                 self.lark.send_image(chat_id, png)
-            self.lark.send_text(chat_id, f"📊 {title}\n{summary}\n\n{explanation}", message_id)
+            text = f"📊 {title}\n{summary}"
+            if explanation.strip():
+                text += f"\n\n{explanation.strip()}"
+            self.lark.send_text(chat_id, text, message_id)
         self.lark.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:
@@ -124,14 +133,28 @@ class ApiMonitor(threading.Thread):
         except Exception:
             log.exception("initial poll failed; will retry")
 
-        while self._running.is_set():
-            self._running.wait(poll)
-            if not self._running.is_set():
+        while not self._stop.is_set():
+            self._stop.wait(poll)  # sleeps the full interval; wakes early only on stop()
+            if self._stop.is_set():
                 break
             try:
                 self._poll()
                 for s in self.detector.find_new_spikes(self.snapshot_series()):
                     log.warning("NEW SPIKE: %s = %s req (%.1fx baseline)", s.ts, int(s.count), s.ratio)
                     self.on_spike(s, self)
+            except requests.exceptions.HTTPError as exc:
+                resp = getattr(exc, "response", None)
+                if resp is not None and resp.status_code == 429:
+                    # Rate limited: back off (honor Retry-After when present)
+                    # instead of retrying on the next tick and staying limited.
+                    try:
+                        retry_after = int(resp.headers.get("Retry-After", "0") or 0)
+                    except ValueError:
+                        retry_after = 0
+                    delay = max(retry_after, poll * 4)
+                    log.warning("Cloudflare API rate limited (429); backing off %ds", delay)
+                    self._stop.wait(delay)
+                else:
+                    log.exception("poll/spike-eval error")
             except Exception:
                 log.exception("poll/spike-eval error")

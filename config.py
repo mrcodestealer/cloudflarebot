@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -28,6 +29,26 @@ def _int(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         return default
+
+
+def _str_set(name: str) -> frozenset[str]:
+    """Parse a comma/whitespace-separated env var into a set of tokens."""
+    raw = os.getenv(name, "") or ""
+    return frozenset(t for t in re.split(r"[,\s]+", raw.strip()) if t)
+
+
+def _str_list(name: str) -> tuple[str, ...]:
+    """Parse a comma/whitespace-separated env var into an ordered, de-duped tuple.
+
+    Order is preserved (unlike ``_str_set``) so, e.g., @mentions render in a
+    stable sequence across sends.
+    """
+    raw = os.getenv(name, "") or ""
+    out: list[str] = []
+    for t in re.split(r"[,\s]+", raw.strip()):
+        if t and t not in out:
+            out.append(t)
+    return tuple(out)
 
 
 @dataclass
@@ -62,6 +83,24 @@ class Config:
     lark_bot_open_id: str = field(default_factory=lambda: os.getenv("LARK_BOT_OPEN_ID", ""))
     lark_reaction_processing: str = field(default_factory=lambda: os.getenv("LARK_REACTION_PROCESSING", "OK"))
     lark_reaction_done: str = field(default_factory=lambda: os.getenv("LARK_REACTION_DONE", "DONE"))
+    # Lark user open_ids (ou_...) to @-mention on a spike alert, so a human is
+    # pinged to look ("@Alice kindly check"). Rendered as real <at> mentions in
+    # the card. Comma/space-separated; empty = mention nobody. Get an open_id by
+    # DMing the bot "/whoami".
+    alert_mention_open_ids: tuple = field(default_factory=lambda: _str_list("ALERT_MENTION_OPEN_IDS"))
+    # Short note shown after the @mentions on an alert card.
+    alert_mention_note: str = field(default_factory=lambda: os.getenv("ALERT_MENTION_NOTE", "kindly check"))
+
+    # Remote deploy (/deploy command). Only Lark user open_ids in this allowlist,
+    # messaging the bot in a 1:1 PM, may trigger a git pull + service restart.
+    # Empty = nobody is authorized (the command is effectively disabled).
+    admin_open_ids: frozenset = field(default_factory=lambda: _str_set("ADMIN_OPEN_IDS"))
+    # Service name and the exact command used to restart it. The default uses
+    # systemd-run so the restart runs in its own transient unit (survives this
+    # process being killed by the restart). The service runs as root, so no sudo
+    # is needed; prefix with 'sudo ' if you run it as a non-root user.
+    deploy_service: str = field(default_factory=lambda: os.getenv("DEPLOY_SERVICE", "cloudflarebot.service"))
+    deploy_restart_cmd: str = field(default_factory=lambda: os.getenv("DEPLOY_RESTART_CMD", ""))
 
     # Qwen / Ollama
     ollama_host: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"))

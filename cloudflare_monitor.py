@@ -325,11 +325,10 @@ class CloudflareMonitor(threading.Thread):
 
         if png:
             self.lark.send_image(chat_id, png)
-        self.lark.send_text(
-            chat_id,
-            f"📊 {config.cf_zone} — Cloudflare L7 DDoS (last 6h)\n{summary}\n\n{explanation}",
-            message_id,
-        )
+        text = f"📊 {config.cf_zone} — Cloudflare L7 DDoS (last 6h)\n{summary}"
+        if explanation.strip():
+            text += f"\n\n{explanation.strip()}"
+        self.lark.send_text(chat_id, text, message_id)
         self.lark.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:

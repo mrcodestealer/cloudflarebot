@@ -10,6 +10,7 @@ just because the reviewer was down.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -17,6 +18,8 @@ from typing import List, Optional, Tuple
 import requests
 
 from config import config
+
+log = logging.getLogger("qwen")
 
 
 @dataclass
@@ -133,5 +136,8 @@ def explain_current(summary: str, recent: List[Tuple[str, float]], kind: str = "
     )
     ok, content = _chat(system, user)
     if not ok:
-        return f"(AI explanation unavailable) {content}"
+        # No usable explanation: log why, return empty so callers simply omit
+        # the AI-review section instead of showing an error to the group.
+        log.warning("explain_current unavailable: %s", content)
+        return ""
     return content

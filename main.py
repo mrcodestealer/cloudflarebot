@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 
+import deployer
 from cards import info_card, spike_card
 from chart import render_series_png
 from config import config
@@ -36,6 +37,7 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 _MO_ALIASES = {"mo", "monitor", "status", "chart"}
+_DEPLOY_ALIASES = {"deploy", "redeploy", "update", "pull"}
 
 _VERDICT_ICON = {"ABNORMAL": "🚨", "NORMAL": "✅", "UNKNOWN": "⚠️"}
 
@@ -46,13 +48,19 @@ def _format_alert(spike, review) -> str:
     lines = [
         f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}",
         f"• Time: {fmt_ts(spike.ts)}",
-        f"• Requests: {int(spike.count):,} in one bucket",
+        f"• Peak: {int(spike.count):,} req in one bucket",
         f"• Baseline: {int(spike.baseline_mean):,} avg (±{int(spike.baseline_std):,}), "
         f"~{spike.ratio}× normal",
         f"• Qwen verdict: {review.verdict}",
-        "",
-        review.explanation.strip() or "(no AI assessment available)",
     ]
+    # Include the model's explanation only when it actually answered — never
+    # raw failure text like '(model returned an empty response)'.
+    if getattr(review, "ok", True) and review.explanation.strip():
+        lines += ["", review.explanation.strip()]
+    # Plain text can't render a real @mention (that needs the interactive card),
+    # so surface only the note here — never the raw open_ids.
+    if config.alert_mention_open_ids and config.alert_mention_note.strip():
+        lines.append(f"\n🔔 {config.alert_mention_note.strip()}")
     return "\n".join(lines)
 
 
@@ -85,6 +93,9 @@ def main() -> int:
 
     lark_bot = LarkBot(config)
 
+    # If a /deploy just restarted us, post a "back online" confirmation.
+    deployer.notify_if_redeployed(lark_bot)
+
     def on_spike(spike, monitor) -> None:
         """Review a new spike with Qwen and alert the group (off the monitor thread)."""
         def work() -> None:
@@ -96,7 +107,11 @@ def main() -> int:
                     series, f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)", highlight_ts=spike.ts
                 )
                 image_key = lark_bot.upload_image(png) if png else None
-                card = spike_card(spike, review, image_key)
+                card = spike_card(
+                    spike, review, image_key,
+                    mention_ids=config.alert_mention_open_ids,
+                    mention_note=config.alert_mention_note,
+                )
                 if not lark_bot.send_card(config.lark_chat_id, card):
                     # Fall back to plain text if the card is rejected.
                     lark_bot.send_text(config.lark_chat_id, _format_alert(spike, review))
@@ -129,7 +144,11 @@ def main() -> int:
                 spike.recent, f"{config.cf_zone} — Cloudflare L7 DDoS (sample)", highlight_ts=spike.ts
             )
             image_key = lark_bot.upload_image(png) if png else None
-            card = spike_card(spike, review, image_key)
+            card = spike_card(
+                spike, review, image_key,
+                mention_ids=config.alert_mention_open_ids,
+                mention_note=config.alert_mention_note,
+            )
             card["header"]["title"]["content"] = "🧪 TEST — " + card["header"]["title"]["content"]
             if not lark_bot.send_card(config.lark_chat_id, card):
                 lark_bot.send_text(config.lark_chat_id, "🧪 TEST ALERT\n\n" + _format_alert(spike, review))
@@ -143,7 +162,19 @@ def main() -> int:
         finally:
             lark_bot.add_reaction(message_id, config.lark_reaction_done)  # ✅ done
 
-    def command_handler(command: str, args: str, chat_id: str, message_id: str, chat_type: str = "") -> None:
+    def _reply_async(text: str, chat_id: str, message_id: str) -> None:
+        threading.Thread(
+            target=lambda: lark_bot.send_text(chat_id, text, message_id), daemon=True
+        ).start()
+
+    def command_handler(
+        command: str,
+        args: str,
+        chat_id: str,
+        message_id: str,
+        chat_type: str = "",
+        sender_open_id: str = "",
+    ) -> None:
         """Runs on the WS thread — keep it non-blocking."""
         if command in _MO_ALIASES:
             monitor.submit_command(command, args, chat_id, message_id)
@@ -151,20 +182,45 @@ def main() -> int:
             threading.Thread(
                 target=run_test_alert, args=(chat_id, message_id), name="test-alert", daemon=True
             ).start()
+        elif command == "whoami":
+            # Handy for populating ADMIN_OPEN_IDS: tells the caller their open_id.
+            _reply_async(f"Your Lark open_id:\n{sender_open_id or '(unknown)'}", chat_id, message_id)
+        elif command in _DEPLOY_ALIASES:
+            # Admin-only, PM-only: git pull + restart the service.
+            if chat_type != "p2p":
+                log.info("ignoring /%s outside a 1:1 PM (chat_type=%s)", command, chat_type)
+                return
+            if not config.admin_open_ids or sender_open_id not in config.admin_open_ids:
+                log.warning("unauthorized /%s attempt from open_id=%r", command, sender_open_id)
+                _reply_async(
+                    "⛔ Not authorized to deploy.\n"
+                    f"Your open_id: {sender_open_id or '(unknown)'}\n"
+                    "An admin must add it to ADMIN_OPEN_IDS in the server .env.",
+                    chat_id,
+                    message_id,
+                )
+                return
+            log.info("authorized /%s from open_id=%s", command, sender_open_id)
+            threading.Thread(
+                target=deployer.run_deploy,
+                args=(lark_bot, chat_id, message_id),
+                name="deploy",
+                daemon=True,
+            ).start()
         elif chat_type == "group":
             # Stay silent on unknown commands in a group (only tagged known
             # commands like /mo get a reply — keeps the group uncluttered).
             log.info("ignoring unknown group command '/%s'", command)
         else:
-            def reply() -> None:
-                lark_bot.send_text(
-                    chat_id,
-                    f"Unknown command '/{command}'.\n"
-                    f"• /mo — live chart + AI review\n"
-                    f"• /testalert — post a sample spike alert",
-                    message_id,
-                )
-            threading.Thread(target=reply, daemon=True).start()
+            _reply_async(
+                f"Unknown command '/{command}'.\n"
+                f"• /mo — live chart + AI review\n"
+                f"• /testalert — post a sample spike alert\n"
+                f"• /deploy — git pull + restart (admin only)\n"
+                f"• /whoami — show your open_id",
+                chat_id,
+                message_id,
+            )
 
     lark_bot.command_handler = command_handler
 
