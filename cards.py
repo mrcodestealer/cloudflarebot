@@ -75,8 +75,6 @@ def spike_card(
         {"tag": "div", "fields": [
             {"is_short": True, "text": _md(f"**🕒 Time**\n{fmt_ts(spike.ts)}")},
             {"is_short": True, "text": _md(f"**📈 Peak**\n{int(spike.count):,} req / 5-min")},
-            {"is_short": True, "text": _md(f"**📊 Baseline**\n{int(spike.baseline_mean):,} (±{int(spike.baseline_std):,})")},
-            {"is_short": True, "text": _md(f"**🔺 vs normal**\n~{spike.ratio}×")},
         ]},
         {"tag": "hr"},
         {"tag": "div", "text": _md(_verdict_md(review, verdict))},

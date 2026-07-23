@@ -49,8 +49,6 @@ def _format_alert(spike, review) -> str:
         f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}",
         f"• Time: {fmt_ts(spike.ts)}",
         f"• Peak: {int(spike.count):,} req in one bucket",
-        f"• Baseline: {int(spike.baseline_mean):,} avg (±{int(spike.baseline_std):,}), "
-        f"~{spike.ratio}× normal",
         f"• Qwen verdict: {review.verdict}",
     ]
     # Include the model's explanation only when it actually answered — never
