@@ -87,12 +87,11 @@ def spike_card(
     return _card(template, f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}", elements)
 
 
-def mo_card(series: List[Tuple[str, float]], explanation: str, image_key: Optional[str] = None) -> dict:
-    """Status card for /mo — alert-style field layout, blue header, no @mention.
+def mo_card(series: List[Tuple[str, float]], image_key: Optional[str] = None) -> dict:
+    """Status card for /mo — 🕒 Time + 🔺 6h Peak + chart. Blue, no @mention, no AI.
 
-    Shows the live state of the 6h L7 DDoS window the same way an alert does
-    (structured fields + chart + AI review), but as an informational card:
-    it never tags anyone.
+    Informational (never tags anyone) and deliberately AI-free so /mo stays
+    instant; spike alerts are where the Qwen verdict lives.
     """
     title = f"📊 Cloudflare L7 DDoS — {config.cf_zone} (last 6h)"
     if not series:
@@ -106,9 +105,6 @@ def mo_card(series: List[Tuple[str, float]], explanation: str, image_key: Option
         ]},
         _img_element(image_key, "6h L7 DDoS chart"),
     ]
-    if explanation.strip():
-        elements.append({"tag": "hr"})
-        elements.append({"tag": "div", "text": _md(f"**🤖 AI review**\n{explanation.strip()}")})
     return _card("blue", title, elements)
 
 

@@ -113,31 +113,3 @@ def review_spike(spike: dict, kind: str = "l7ddos") -> Review:
         elif "normal" in low:
             verdict = "NORMAL"
     return Review(verdict=verdict, explanation=content, ok=ok)
-
-
-def explain_current(summary: str, recent: List[Tuple[str, float]], kind: str = "l7ddos") -> str:
-    """Explain the current state of the chart for the /mo command."""
-    metric = _metric_label(kind)
-    system = (
-        "You are a Cloudflare Layer-7 DDoS security analyst. The numbers are "
-        f"{metric}, per 5-minute bucket (near-zero = no attack; a spike = an "
-        "attack Cloudflare mitigated). In 2-4 short sentences, explain the "
-        "current situation to a non-expert: how much attack traffic was "
-        "mitigated recently, any notable spikes, and whether it looks like a "
-        "significant attack or just minor/benign mitigation. Never say there "
-        "were 'no mitigations' -- the numbers ARE the mitigations."
-    )
-    user = (
-        f"Zone: {config.cf_zone}\n"
-        f"Summary: {summary}\n\n"
-        f"Recent buckets (time: {metric}):\n"
-        f"{_series_table(recent)}\n\n"
-        "Explain what this chart is showing right now."
-    )
-    ok, content = _chat(system, user)
-    if not ok:
-        # No usable explanation: log why, return empty so callers simply omit
-        # the AI-review section instead of showing an error to the group.
-        log.warning("explain_current unavailable: %s", content)
-        return ""
-    return content

@@ -79,7 +79,6 @@ class ApiMonitor(threading.Thread):
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
         from cards import mo_card
-        from qwen_client import explain_current
 
         working = self.lark.react_working(message_id)  # 👌 working
         try:
@@ -93,18 +92,15 @@ class ApiMonitor(threading.Thread):
         title = f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)"
         png = render_series_png(series, title, highlight_ts=peak_ts)
         image_key = self.lark.upload_image(png) if png else None
-        explanation = explain_current(summary, series[-12:], kind=self._kind)
 
-        # Alert-style layout, but informational: blue and never @mentions anyone.
-        card = mo_card(series, explanation, image_key)
+        # Chart + stats only, no AI review — the local Qwen model added minutes
+        # to /mo. Spike alerts still carry the Qwen verdict; /mo stays instant.
+        card = mo_card(series, image_key)
         if not self.lark.send_card(chat_id, card):
             # Fallback to image + text if the card is rejected.
             if png:
                 self.lark.send_image(chat_id, png)
-            text = f"📊 {title}\n{summary}"
-            if explanation.strip():
-                text += f"\n\n{explanation.strip()}"
-            self.lark.send_text(chat_id, text, message_id)
+            self.lark.send_text(chat_id, f"📊 {title}\n{summary}", message_id)
         self.lark.react_done(message_id, working)  # remove 👌, add ✅
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:

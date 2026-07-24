@@ -310,8 +310,6 @@ class CloudflareMonitor(threading.Thread):
         )
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
-        from qwen_client import explain_current
-
         working = self.lark.react_working(message_id)  # 👌 working
         png = None
         try:
@@ -320,15 +318,16 @@ class CloudflareMonitor(threading.Thread):
             log.exception("screenshot failed")
 
         summary = self._series_summary()
-        recent = self.snapshot_series()[-12:]
-        explanation = explain_current(summary, recent)
 
         if png:
             self.lark.send_image(chat_id, png)
-        text = f"📊 {config.cf_zone} — Cloudflare L7 DDoS (last 6h)\n{summary}"
-        if explanation.strip():
-            text += f"\n\n{explanation.strip()}"
-        self.lark.send_text(chat_id, text, message_id)
+        # Chart + stats only, no AI review — keeps /mo instant (the local model
+        # was adding minutes). Spike alerts still carry the Qwen verdict.
+        self.lark.send_text(
+            chat_id,
+            f"📊 {config.cf_zone} — Cloudflare L7 DDoS (last 6h)\n{summary}",
+            message_id,
+        )
         self.lark.react_done(message_id, working)  # remove 👌, add ✅
 
     def _handle_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:
