@@ -26,7 +26,6 @@ from cards import spike_card
 from chart import render_series_png
 from config import config
 from lark_bot import LarkBot
-from qwen_client import review_spike
 from spike_detector import Spike
 
 logging.basicConfig(
@@ -39,22 +38,14 @@ log = logging.getLogger("main")
 _MO_ALIASES = {"mo", "monitor", "status", "chart"}
 _DEPLOY_ALIASES = {"deploy", "redeploy", "update", "pull", "git"}
 
-_VERDICT_ICON = {"ABNORMAL": "🚨", "NORMAL": "✅", "UNKNOWN": "⚠️"}
-
-
-def _format_alert(spike, review) -> str:
+def _format_alert(spike) -> str:
+    """Plain-text fallback used only if the interactive card is rejected."""
     from timeutil import fmt as fmt_ts
-    icon = _VERDICT_ICON.get(review.verdict, "⚠️")
     lines = [
-        f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}",
+        f"⚠️ Cloudflare L7 DDoS spike — {config.cf_zone}",
         f"• Time: {fmt_ts(spike.ts)}",
         f"• Peak: {int(spike.count):,} req in one bucket",
-        f"• Qwen verdict: {review.verdict}",
     ]
-    # Include the model's explanation only when it actually answered — never
-    # raw failure text like '(model returned an empty response)'.
-    if getattr(review, "ok", True) and review.explanation.strip():
-        lines += ["", review.explanation.strip()]
     # Plain text can't render a real @mention (that needs the interactive card),
     # so surface only the note here — never the raw open_ids.
     if config.alert_mention_open_ids and config.alert_mention_note.strip():
@@ -95,25 +86,28 @@ def main() -> int:
     deployer.notify_if_redeployed(lark_bot)
 
     def on_spike(spike, monitor) -> None:
-        """Review a new spike with Qwen and alert the group (off the monitor thread)."""
+        """Alert the group about a new spike (off the monitor thread)."""
         def work() -> None:
             try:
-                review = review_spike(spike.as_dict(), kind=getattr(monitor, "_kind", "l7ddos"))
-                # Render the full 6h chart with the spike bucket marked.
-                series = monitor.snapshot_series() or spike.recent
+                from timeutil import tail_minutes, window_label
+                # Chart zoomed to the recent window, with the spike bucket marked.
+                window = config.chart_window_minutes
+                series = tail_minutes(monitor.snapshot_series() or spike.recent, window)
                 png = render_series_png(
-                    series, f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)", highlight_ts=spike.ts
+                    series,
+                    f"{config.cf_zone} — Cloudflare L7 DDoS (last {window_label(window)})",
+                    highlight_ts=spike.ts,
                 )
                 image_key = lark_bot.upload_image(png) if png else None
                 card = spike_card(
-                    spike, review, image_key,
+                    spike, image_key,
                     mention_ids=config.alert_mention_open_ids,
                     mention_note=config.alert_mention_note,
                 )
                 if not lark_bot.send_card(config.lark_chat_id, card):
                     # Fall back to plain text if the card is rejected.
-                    lark_bot.send_text(config.lark_chat_id, _format_alert(spike, review))
-                log.info("alerted spike %s (verdict=%s, chart=%s)", spike.ts, review.verdict, bool(image_key))
+                    lark_bot.send_text(config.lark_chat_id, _format_alert(spike))
+                log.info("alerted spike %s (chart=%s)", spike.ts, bool(image_key))
             except Exception:
                 log.exception("failed to alert spike %s", spike.ts)
 
@@ -129,21 +123,16 @@ def main() -> int:
         log.info("data source: Cloudflare GraphQL Analytics API")
 
     def run_test_alert(chat_id: str, message_id: str) -> None:
-        """/testalert — post a sample spike alert through the real format + Qwen path.
-
-        Runs on its own thread (never the monitor thread) so it can't stall live
-        monitoring even if Qwen is slow.
-        """
+        """/testalert — post a sample spike alert through the real card path."""
         working = lark_bot.react_working(message_id)  # 👌 working
         try:
             spike = _sample_spike()
-            review = review_spike(spike.as_dict())
             png = render_series_png(
                 spike.recent, f"{config.cf_zone} — Cloudflare L7 DDoS (sample)", highlight_ts=spike.ts
             )
             image_key = lark_bot.upload_image(png) if png else None
             # Tests never @mention anyone — only genuine spike alerts ping a human.
-            card = spike_card(spike, review, image_key)
+            card = spike_card(spike, image_key)
             card["header"]["title"]["content"] = "🧪 TEST — " + card["header"]["title"]["content"]
             if config.alert_mention_open_ids:
                 card["elements"].append({"tag": "hr"})
@@ -155,8 +144,8 @@ def main() -> int:
                     ),
                 }})
             if not lark_bot.send_card(config.lark_chat_id, card):
-                lark_bot.send_text(config.lark_chat_id, "🧪 TEST ALERT\n\n" + _format_alert(spike, review))
-            log.info("sent test alert (qwen ok=%s verdict=%s)", review.ok, review.verdict)
+                lark_bot.send_text(config.lark_chat_id, "🧪 TEST ALERT\n\n" + _format_alert(spike))
+            log.info("sent test alert")
         except Exception:
             log.exception("test alert failed")
             try:

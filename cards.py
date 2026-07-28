@@ -10,26 +10,11 @@ from typing import List, Optional, Sequence, Tuple
 
 from config import config
 from timeutil import fmt as fmt_ts
-
-_TEMPLATE = {"ABNORMAL": "red", "NORMAL": "green", "UNKNOWN": "orange"}
-_ICON = {"ABNORMAL": "🚨", "NORMAL": "✅", "UNKNOWN": "⚠️"}
+from timeutil import window_label
 
 
 def _md(content: str) -> dict:
     return {"tag": "lark_md", "content": content}
-
-
-def _verdict_md(review, verdict: str) -> str:
-    """Verdict section for the spike card.
-
-    Includes the model's explanation only when the model actually answered —
-    a failed/empty review (ok=False) would otherwise put raw error text like
-    '(model returned an empty response)' in the group chat.
-    """
-    text = f"**🤖 Qwen verdict: {verdict}**"
-    if getattr(review, "ok", True) and review.explanation.strip():
-        text += f"\n{review.explanation.strip()}"
-    return text
 
 
 def _mention_md(open_ids: Optional[Sequence[str]], note: str) -> str:
@@ -63,37 +48,31 @@ def _card(template: str, title: str, elements: List[dict]) -> dict:
 
 def spike_card(
     spike,
-    review,
     image_key: Optional[str] = None,
     mention_ids: Optional[Sequence[str]] = None,
     mention_note: str = "",
 ) -> dict:
-    verdict = review.verdict
-    template = _TEMPLATE.get(verdict, "orange")
-    icon = _ICON.get(verdict, "⚠️")
     elements = [
         {"tag": "div", "fields": [
             {"is_short": True, "text": _md(f"**🕒 Time**\n{fmt_ts(spike.ts)}")},
             {"is_short": True, "text": _md(f"**📈 Peak**\n{int(spike.count):,} req / 5-min")},
         ]},
-        {"tag": "hr"},
-        {"tag": "div", "text": _md(_verdict_md(review, verdict))},
         _img_element(image_key, "6h L7 DDoS chart"),
     ]
     mention = _mention_md(mention_ids, mention_note)
     if mention:
         elements.append({"tag": "hr"})
         elements.append({"tag": "div", "text": _md(f"🔔 {mention}")})
-    return _card(template, f"{icon} Cloudflare L7 DDoS spike — {config.cf_zone}", elements)
+    return _card("orange", f"⚠️ Cloudflare L7 DDoS spike — {config.cf_zone}", elements)
 
 
 def mo_card(series: List[Tuple[str, float]], image_key: Optional[str] = None) -> dict:
     """Status card for /mo — 🕒 Time + 🔺 6h Peak + chart. Blue, no @mention, no AI.
 
-    Informational (never tags anyone) and deliberately AI-free so /mo stays
-    instant; spike alerts are where the Qwen verdict lives.
+    Informational (never tags anyone) and deliberately AI-free so /mo stays instant.
     """
-    title = f"📊 Cloudflare L7 DDoS — {config.cf_zone} (last 6h)"
+    wl = window_label(config.chart_window_minutes)
+    title = f"📊 Cloudflare L7 DDoS — {config.cf_zone} (last {wl})"
     if not series:
         return _card("blue", title, [{"tag": "div", "text": _md("no data captured yet")}])
     latest_ts, _ = series[-1]
@@ -101,9 +80,9 @@ def mo_card(series: List[Tuple[str, float]], image_key: Optional[str] = None) ->
     elements = [
         {"tag": "div", "fields": [
             {"is_short": True, "text": _md(f"**🕒 Time**\n{fmt_ts(latest_ts)}")},
-            {"is_short": True, "text": _md(f"**🔺 6h Peak**\n{int(peak):,}")},
+            {"is_short": True, "text": _md(f"**🔺 {wl} Peak**\n{int(peak):,}")},
         ]},
-        _img_element(image_key, "6h L7 DDoS chart"),
+        _img_element(image_key, f"{wl} L7 DDoS chart"),
     ]
     return _card("blue", title, elements)
 

@@ -119,10 +119,20 @@ class Config:
     # Monitor loop
     poll_interval_seconds: int = field(default_factory=lambda: _int("POLL_INTERVAL_SECONDS", 30))
     state_dir: str = field(default_factory=lambda: os.getenv("STATE_DIR", "state"))
+    # Coalesce a sustained attack: after firing an alert, suppress further alerts
+    # for this many minutes (the buckets are still recorded, just not re-posted),
+    # so one ongoing attack spanning many 5-min buckets doesn't spam the group.
+    # 0 = alert on every new spike bucket.
+    alert_cooldown_minutes: float = field(default_factory=lambda: _float("ALERT_COOLDOWN_MINUTES", 15.0))
 
     # Display timezone (Cloudflare data is UTC; shown in this offset). Default GMT+8.
     display_tz_offset: float = field(default_factory=lambda: _float("DISPLAY_TZ_OFFSET", 8.0))
     display_tz_label: str = field(default_factory=lambda: os.getenv("DISPLAY_TZ_LABEL", "GMT+8"))
+
+    # Chart/peak display window (minutes). The chart and the "Peak" figure cover
+    # the last N minutes; spike detection still uses the full fetched history so
+    # the baseline stays valid. Default 30 minutes.
+    chart_window_minutes: float = field(default_factory=lambda: _float("CHART_WINDOW_MINUTES", 30.0))
 
     def validate(self) -> list[str]:
         """Return a list of human-readable problems with the configuration."""

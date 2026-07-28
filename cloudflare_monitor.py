@@ -170,6 +170,34 @@ class CloudflareMonitor(threading.Thread):
         self._page = None
         self._ctx = None
         self._display = None
+        # Alert coalescing: suppress repeat alerts within this window (see config).
+        self._alert_cooldown_s = max(0.0, config.alert_cooldown_minutes * 60.0)
+        self._last_alert_at = 0.0  # time.monotonic() of the last fired alert
+
+    def _maybe_alert(self, new_spikes) -> None:
+        """Fire at most one alert per cooldown window for a batch of new spikes.
+
+        A sustained attack spikes several consecutive 5-min buckets; alert on the
+        most severe new one and stay quiet for `alert_cooldown_minutes` so one
+        ongoing attack doesn't spam the group. Suppressed buckets are still
+        recorded by the detector, so they never re-fire.
+        """
+        if not new_spikes:
+            return
+        peak = max(new_spikes, key=lambda s: s.count)
+        now = time.monotonic()
+        if self._last_alert_at and self._alert_cooldown_s and (now - self._last_alert_at) < self._alert_cooldown_s:
+            log.info(
+                "alert cooldown active (%.0fs left); suppressed %d new spike bucket(s), peak %s=%d req",
+                self._alert_cooldown_s - (now - self._last_alert_at), len(new_spikes), peak.ts, int(peak.count),
+            )
+            return
+        self._last_alert_at = now
+        log.warning(
+            "NEW SPIKE: %s = %d req (%.1fx baseline); %d new bucket(s), alerting peak",
+            peak.ts, int(peak.count), peak.ratio, len(new_spikes),
+        )
+        self.on_spike(peak, self)
 
     # ------------------------------------------------------------- public API
     def submit_command(self, command: str, args: str, chat_id: str, message_id: str) -> None:
@@ -322,7 +350,7 @@ class CloudflareMonitor(threading.Thread):
         if png:
             self.lark.send_image(chat_id, png)
         # Chart + stats only, no AI review — keeps /mo instant (the local model
-        # was adding minutes). Spike alerts still carry the Qwen verdict.
+        # was adding minutes of latency).
         self.lark.send_text(
             chat_id,
             f"📊 {config.cf_zone} — Cloudflare L7 DDoS (last 6h)\n{summary}",
@@ -414,10 +442,7 @@ class CloudflareMonitor(threading.Thread):
                     if now - last_eval >= poll:
                         last_eval = now
                         try:
-                            new_spikes = self.detector.find_new_spikes(self.snapshot_series())
-                            for s in new_spikes:
-                                log.warning("NEW SPIKE: %s = %s req (%.1fx baseline)", s.ts, int(s.count), s.ratio)
-                                self.on_spike(s, self)
+                            self._maybe_alert(self.detector.find_new_spikes(self.snapshot_series()))
                         except Exception:
                             log.exception("spike evaluation error")
 

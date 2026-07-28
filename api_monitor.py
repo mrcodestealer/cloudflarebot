@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Callable, List, Tuple
 
 import requests
@@ -36,6 +37,9 @@ class ApiMonitor(threading.Thread):
         )
         self._series: List[Tuple[str, float]] = []
         self._kind = "l7ddos"
+        # Alert coalescing: suppress repeat alerts within this window (see config).
+        self._alert_cooldown_s = max(0.0, config.alert_cooldown_minutes * 60.0)
+        self._last_alert_at = 0.0  # time.monotonic() of the last fired alert
         # Stop *event*: clear while running, set to stop. The run loop sleeps via
         # _stop.wait(poll), which blocks while the flag is False — i.e. it really
         # waits the poll interval and wakes early only when stop() is called.
@@ -65,20 +69,23 @@ class ApiMonitor(threading.Thread):
 
     # -------------------------------------------------------------- commands
     def _series_summary(self) -> str:
-        series = self.snapshot_series()
+        from timeutil import fmt as fmt_ts
+        from timeutil import tail_minutes, window_label
+        series = tail_minutes(self.snapshot_series(), config.chart_window_minutes)
         if not series:
             return "no data captured yet"
-        from timeutil import fmt as fmt_ts
         latest_ts, latest = series[-1]
         peak_ts, peak = max(series, key=lambda p: p[1])
         label = "L7 DDoS mitigations" if self._kind == "l7ddos" else "total requests"
+        wl = window_label(config.chart_window_minutes)
         return (
             f"{label}: latest {int(latest):,} ({fmt_ts(latest_ts)}); "
-            f"6h peak {int(peak):,} ({fmt_ts(peak_ts)}); {len(series)} buckets"
+            f"{wl} peak {int(peak):,} ({fmt_ts(peak_ts)}); {len(series)} buckets"
         )
 
     def _handle_mo(self, chat_id: str, message_id: str) -> None:
         from cards import mo_card
+        from timeutil import tail_minutes, window_label
 
         working = self.lark.react_working(message_id)  # 👌 working
         try:
@@ -86,15 +93,16 @@ class ApiMonitor(threading.Thread):
         except Exception:
             log.exception("refresh for /mo failed; using cached data")
 
-        series = self.snapshot_series()
+        # Zoom the chart + peak to the recent window; detection keeps the full series.
+        series = tail_minutes(self.snapshot_series(), config.chart_window_minutes)
         summary = self._series_summary()
         peak_ts = max(series, key=lambda p: p[1])[0] if series else None
-        title = f"{config.cf_zone} — Cloudflare L7 DDoS (last 6h)"
+        title = f"{config.cf_zone} — Cloudflare L7 DDoS (last {window_label(config.chart_window_minutes)})"
         png = render_series_png(series, title, highlight_ts=peak_ts)
         image_key = self.lark.upload_image(png) if png else None
 
-        # Chart + stats only, no AI review — the local Qwen model added minutes
-        # to /mo. Spike alerts still carry the Qwen verdict; /mo stays instant.
+        # Chart + stats only, no AI review — keeps /mo instant (the local model
+        # added minutes of latency).
         card = mo_card(series, image_key)
         if not self.lark.send_card(chat_id, card):
             # Fallback to image + text if the card is rejected.
@@ -119,6 +127,31 @@ class ApiMonitor(threading.Thread):
             except Exception:
                 pass
 
+    def _maybe_alert(self, new_spikes) -> None:
+        """Fire at most one alert per cooldown window for a batch of new spikes.
+
+        A sustained attack produces a spike in several consecutive 5-min buckets;
+        without this the group would get one card per bucket. We alert on the most
+        severe new bucket and stay quiet for `alert_cooldown_minutes`. The detector
+        has already recorded every bucket as seen, so suppressed ones never re-fire.
+        """
+        if not new_spikes:
+            return
+        peak = max(new_spikes, key=lambda s: s.count)
+        now = time.monotonic()
+        if self._last_alert_at and self._alert_cooldown_s and (now - self._last_alert_at) < self._alert_cooldown_s:
+            log.info(
+                "alert cooldown active (%.0fs left); suppressed %d new spike bucket(s), peak %s=%d req",
+                self._alert_cooldown_s - (now - self._last_alert_at), len(new_spikes), peak.ts, int(peak.count),
+            )
+            return
+        self._last_alert_at = now
+        log.warning(
+            "NEW SPIKE: %s = %d req (%.1fx baseline); %d new bucket(s), alerting peak",
+            peak.ts, int(peak.count), peak.ratio, len(new_spikes),
+        )
+        self.on_spike(peak, self)
+
     # ------------------------------------------------------------------- loop
     def run(self) -> None:
         poll = config.poll_interval_seconds
@@ -136,9 +169,7 @@ class ApiMonitor(threading.Thread):
                 break
             try:
                 self._poll()
-                for s in self.detector.find_new_spikes(self.snapshot_series()):
-                    log.warning("NEW SPIKE: %s = %s req (%.1fx baseline)", s.ts, int(s.count), s.ratio)
-                    self.on_spike(s, self)
+                self._maybe_alert(self.detector.find_new_spikes(self.snapshot_series()))
             except requests.exceptions.HTTPError as exc:
                 resp = getattr(exc, "response", None)
                 if resp is not None and resp.status_code == 429:
