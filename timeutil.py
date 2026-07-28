@@ -7,7 +7,7 @@ what the user sees in the dashboard's local view.
 from __future__ import annotations
 
 import datetime
-from typing import Optional
+from typing import List, Optional, Sequence, Tuple
 
 from config import config
 
@@ -37,3 +37,34 @@ def fmt(ts: str, date: bool = True, label: bool = True) -> str:
         return ts
     s = dt.strftime("%Y-%m-%d %H:%M" if date else "%H:%M")
     return f"{s} {config.display_tz_label}" if label else s
+
+
+def window_label(minutes: float) -> str:
+    """Human label for a time window: 30 -> '30 min', 360 -> '6h', 90 -> '90 min'."""
+    m = int(round(minutes))
+    if m >= 60 and m % 60 == 0:
+        return f"{m // 60}h"
+    return f"{m} min"
+
+
+def tail_minutes(
+    series: Sequence[Tuple[str, float]], minutes: float
+) -> List[Tuple[str, float]]:
+    """Return the tail of a [(iso_ts, count)] series covering the last `minutes`.
+
+    Sliced by timestamp relative to the latest bucket (not by count), so gaps in
+    the series don't widen the window. Used to zoom the chart/peak to a recent
+    window while the detector keeps working off the full history it's fed.
+    """
+    if not series or minutes <= 0:
+        return list(series)
+    latest = None
+    for ts, _ in reversed(series):
+        latest = parse_utc(ts)
+        if latest is not None:
+            break
+    if latest is None:
+        return list(series)
+    cutoff = latest - datetime.timedelta(minutes=minutes)
+    out = [(ts, c) for ts, c in series if (parse_utc(ts) or latest) >= cutoff]
+    return out or list(series[-1:])
