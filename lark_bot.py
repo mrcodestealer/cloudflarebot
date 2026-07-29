@@ -14,7 +14,7 @@ import io
 import json
 import logging
 import re
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
@@ -39,6 +39,13 @@ CommandHandler = Callable[[str, str, str, str, str, str], None]
 _MENTION_PLACEHOLDER = re.compile(r"@_\w+")
 # A command is a "/word" token appearing at the start or after whitespace.
 _COMMAND_RE = re.compile(r"(?:^|\s)/([A-Za-z]\w*)\b\s*(.*)$")
+# Natural multi-word phrasings mapped to a single command, so "@bot who am i"
+# works as well as "/whoami". The optional leading slash and flexible spacing
+# mean one pattern covers "whoami", "who am i", "/who am i" and "who am i?".
+_PHRASE_ALIASES = (
+    (re.compile(r"^/?\s*who\s*am\s*i\b\??\s*(.*)$", re.IGNORECASE), "whoami"),
+    (re.compile(r"^/?\s*my\s+open[\s_-]?id\b\??\s*(.*)$", re.IGNORECASE), "whoami"),
+)
 
 
 class LarkBot:
@@ -193,6 +200,30 @@ class LarkBot:
             return ""
         return data.get("text", "") or ""
 
+    @staticmethod
+    def _parse_command(text: str) -> Optional[Tuple[str, str]]:
+        """Extract (command, args) from message text; None if there is nothing.
+
+        Accepts, in order: a natural phrase ("who am i"), a slash command
+        ("/mo 30"), or a bare leading word ("mo", "whoami"). Callers must have
+        already confirmed the message is addressed to this bot — an @-mention in
+        a group, or any message in a 1:1 chat — since a bare word is otherwise
+        indistinguishable from ordinary chatter.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        # Phrases first: "/who am i" would otherwise parse as the command "who".
+        for pattern, command in _PHRASE_ALIASES:
+            m = pattern.match(text)
+            if m:
+                return command, (m.group(1) or "").strip()
+        match = _COMMAND_RE.search(text)
+        if match:
+            return match.group(1).lower(), (match.group(2) or "").strip()
+        parts = text.split(maxsplit=1)
+        return parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
+
     def _on_message(self, data: P2ImMessageReceiveV1) -> None:
         try:
             msg = data.event.message
@@ -235,18 +266,14 @@ class LarkBot:
                         log.info("ignoring group msg: bot not the @target (mentioned=%s)", mentioned)
                         return
 
-            match = _COMMAND_RE.search(text)
-            if match:
-                command = match.group(1).lower()
-                args = (match.group(2) or "").strip()
-            elif chat_type != "group" and text:
-                # In a 1:1 chat, accept a bare command with no leading slash and no
-                # @-tag ("mo", "testalert", "status").
-                parts = text.split(maxsplit=1)
-                command = parts[0].lower()
-                args = parts[1] if len(parts) > 1 else ""
-            else:
+            # Slash-free phrasing is accepted in a group too: by this point the bot
+            # is confirmed to be the @-mention target, so "@bot who am i" is
+            # unambiguously addressed to us. Unknown commands stay silent in groups
+            # (see the handler), so this can't make the bot chatty.
+            parsed = self._parse_command(text)
+            if parsed is None:
                 return
+            command, args = parsed
 
             log.info("dispatch command '/%s' from chat=%s (%s)", command, chat_id, chat_type)
             if self.command_handler:
