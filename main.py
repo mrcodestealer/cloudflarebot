@@ -22,6 +22,7 @@ import threading
 import time
 
 import deployer
+import health_report
 from cards import spike_card
 from chart import render_series_png
 from config import config
@@ -108,6 +109,7 @@ def main() -> int:
                     # Fall back to plain text if the card is rejected.
                     lark_bot.send_text(config.lark_chat_id, _format_alert(spike))
                 log.info("alerted spike %s (chart=%s)", spike.ts, bool(image_key))
+                health_report.bump("Spike alerts")
             except Exception:
                 log.exception("failed to alert spike %s", spike.ts)
 
@@ -219,6 +221,23 @@ def main() -> int:
 
     log.info("starting Cloudflare monitor thread...")
     monitor.start()
+
+    # Daily health report card to the ops group, on its own daemon thread.
+    # Must start before lark_bot.start() blocks, and must never stop the boot.
+    try:
+        from health_checks import build_checks
+        health_report.start(
+            "cloudflarebot",
+            # Raises LarkError(code) so 230002 "bot not in group" stops retrying,
+            # and sends a per-report uuid so a timed-out retry is not posted twice.
+            send_card=health_report.make_lark_sender(
+                config.lark_app_id, config.lark_app_secret, config.lark_domain
+            ),
+            checks=build_checks(lark_bot, monitor),
+            expect_threads=[monitor.name],  # "cf-api-monitor" (api) / "cf-monitor" (browser)
+        )
+    except Exception:
+        log.exception("health report failed to start; continuing without it")
 
     # Give the browser a moment to launch/login before opening the WS.
     time.sleep(2)

@@ -164,6 +164,7 @@ class CloudflareMonitor(threading.Thread):
         )
         self._series: Dict[str, float] = {}
         self._last_capture = 0.0
+        self._last_poll_ok = 0.0  # time.time() of the last real GraphQL capture (health report)
         self._cmd_q: "queue.Queue[Tuple[str, str, str, str]]" = queue.Queue()
         self._running = threading.Event()
         self._running.set()
@@ -224,6 +225,7 @@ class CloudflareMonitor(threading.Thread):
         for ts, total in totals.items():
             self._series[ts] = total  # upsert: newest snapshot wins for a bucket
         self._last_capture = time.time()
+        self._last_poll_ok = self._last_capture  # unlike _last_capture, the watchdog never resets it
         log.debug("captured %d buckets from %s", len(totals), response.url)
 
     # --------------------------------------------------------------- browser

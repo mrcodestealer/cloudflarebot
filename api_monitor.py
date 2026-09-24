@@ -40,6 +40,7 @@ class ApiMonitor(threading.Thread):
         # Alert coalescing: suppress repeat alerts within this window (see config).
         self._alert_cooldown_s = max(0.0, config.alert_cooldown_minutes * 60.0)
         self._last_alert_at = 0.0  # time.monotonic() of the last fired alert
+        self._last_poll_ok = 0.0  # time.time() of the last successful poll (health report)
         # Stop *event*: clear while running, set to stop. The run loop sleeps via
         # _stop.wait(poll), which blocks while the flag is False — i.e. it really
         # waits the poll interval and wakes early only when stop() is called.
@@ -66,6 +67,7 @@ class ApiMonitor(threading.Thread):
         result = cloudflare_api.fetch_series(hours=6)
         self._series = result["series"]
         self._kind = result["kind"]
+        self._last_poll_ok = time.time()
 
     # -------------------------------------------------------------- commands
     def _series_summary(self) -> str:

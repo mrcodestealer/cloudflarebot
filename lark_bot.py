@@ -30,6 +30,8 @@ from lark_oapi.api.im.v1 import (
 )
 from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
+import health_report
+
 log = logging.getLogger("lark")
 
 # command handler signature: (command, args, chat_id, message_id, chat_type, sender_open_id)
@@ -226,6 +228,8 @@ class LarkBot:
 
     def _on_message(self, data: P2ImMessageReceiveV1) -> None:
         try:
+            health_report.bump("Lark events")
+            health_report.mark("Last Lark event")
             msg = data.event.message
             chat_id = msg.chat_id
             message_id = msg.message_id

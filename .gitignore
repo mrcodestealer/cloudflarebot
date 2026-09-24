@@ -9,6 +9,9 @@ cf_debug/
 # Runtime state
 state/
 *.log
+.health_report_state.json
+.health_report_state.json.tmp
+.health_report_state.lock
 
 # Python
 __pycache__/
